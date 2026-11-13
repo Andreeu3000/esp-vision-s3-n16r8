@@ -1,0 +1,12 @@
+{
+    "deploy": [],
+    "docs": "",
+    "features": [
+        "WiFi"
+    ],
+    "mcu": "esp32s3",
+    "product": "ESP32-S3-N16R8",
+    "thumbnail": "",
+    "url": "",
+    "vendor": "Espressif"
+}

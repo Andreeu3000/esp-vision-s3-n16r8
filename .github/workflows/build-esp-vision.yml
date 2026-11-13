@@ -1,0 +1,79 @@
+name: Build ESP-VISION S3 N16R8
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout custom board
+        uses: actions/checkout@v4
+
+      - name: Download pinned ESP-VISION
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git clone https://github.com/espressif/esp-vision.git esp-vision
+
+          git -C esp-vision checkout --detach \
+            bd16dbc8677f8d1e0ca7d489c5e6591e574f4f3a
+
+          git -C esp-vision submodule update \
+            --init --recursive --jobs 4
+
+          rm -rf esp-vision/boards/ESP32_S3_N16R8
+          cp -a boards/ESP32_S3_N16R8 \
+            esp-vision/boards/ESP32_S3_N16R8
+
+      - name: Build firmware with ESP-IDF 5.5.6
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/esp-vision-work"
+
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/esp-vision:/project" \
+            -v "$RUNNER_TEMP/esp-vision-work:/work" \
+            -w /project \
+            espressif/idf:v5.5.6 \
+            bash -lc '
+              set -euo pipefail
+
+              export IDF_EXTRA_ACTIONS_PATH=/project
+              export ESP_VISION_WORK_DIR=/work
+
+              mkdir -p "$ESP_VISION_WORK_DIR/tmp"
+
+              export TMPDIR="$ESP_VISION_WORK_DIR/tmp"
+              export TMP="$TMPDIR"
+              export TEMP="$TMPDIR"
+
+              idf.py \
+                --board ESP32_S3_N16R8 \
+                -B "$ESP_VISION_WORK_DIR/build/ESP32_S3_N16R8" \
+                -j 2 \
+                build
+            '
+
+      - name: Upload firmware artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ESP-VISION-S3-N16R8
+          path: |
+            ${{ runner.temp }}/esp-vision-work/build/ESP32_S3_N16R8/**/*.bin
+            ${{ runner.temp }}/esp-vision-work/build/ESP32_S3_N16R8/**/flasher_args.json
+            ${{ runner.temp }}/esp-vision-work/build/ESP32_S3_N16R8/**/flash_project_args
+          if-no-files-found: warn
+          retention-days: 14
