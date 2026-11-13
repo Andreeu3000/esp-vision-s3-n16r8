@@ -43,7 +43,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/esp-vision-work"
 
           docker run --rm \
-            -e IDF_GIT_SAFE_DIR=/project:/project/lib/micropython:/project/lib/ulab:/project/lib/zxing-cpp:/project/lib/micropython/lib/micropython-lib \
+            -e IDF_GIT_SAFE_DIR=/project:/project/* \
             -v "$GITHUB_WORKSPACE/esp-vision:/project" \
             -v "$RUNNER_TEMP/esp-vision-work:/work" \
             -w /project \
