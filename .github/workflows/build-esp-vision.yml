@@ -49,6 +49,7 @@ jobs:
             espressif/idf:v5.5.6 \
             bash -lc '
               set -euo pipefail
+              export IDF_PY_BUILD_JOBS=2
 
               export IDF_EXTRA_ACTIONS_PATH=/project
               export ESP_VISION_WORK_DIR=/work
@@ -62,7 +63,6 @@ jobs:
               idf.py \
                 --board ESP32_S3_N16R8 \
                 -B "$ESP_VISION_WORK_DIR/build/ESP32_S3_N16R8" \
-                -j 2 \
                 build
             '
 
