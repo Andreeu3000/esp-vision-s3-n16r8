@@ -36,3 +36,27 @@ new = old.replace(
 assert old in s, "No se encontró el bloque USB esperado; no se modificó."
 p.write_text(s.replace(old, new, 1))
 print("Parche USB aplicado correctamente.")
+
+# PATCH: include boardconfig.h in ev_stdio.c
+# This makes ESP_VISION_EV_MUX_DEFAULT_ENABLED board-specific.
+upstream = Path(sys.argv[1])
+
+board_cfg = upstream / "boards/ESP32_S3_N16R8/boardconfig.h"
+assert board_cfg.exists(), "No existe boardconfig.h de la placa"
+
+board_text = board_cfg.read_text()
+assert "#define ESP_VISION_EV_MUX_DEFAULT_ENABLED (0)" in board_text, \
+    "EV-MUX no está desactivado en boardconfig.h"
+
+ev_stdio = upstream / "platform/ev_stdio.c"
+source = ev_stdio.read_text()
+
+anchor = '#include "ev_stdio.h"\n'
+include = '#include "boardconfig.h"\n'
+
+if include not in source:
+    assert anchor in source, "No se encontró el include de ev_stdio.h"
+    source = source.replace(anchor, anchor + include, 1)
+
+ev_stdio.write_text(source)
+print("Configuración de placa conectada correctamente a ev_stdio.c")
