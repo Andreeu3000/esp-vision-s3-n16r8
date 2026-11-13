@@ -43,15 +43,14 @@ jobs:
           mkdir -p "$RUNNER_TEMP/esp-vision-work"
 
           docker run --rm \
+            -e IDF_GIT_SAFE_DIR=/project:/project/lib/micropython:/project/lib/ulab:/project/lib/zxing-cpp:/project/lib/micropython/lib/micropython-lib \
             -v "$GITHUB_WORKSPACE/esp-vision:/project" \
             -v "$RUNNER_TEMP/esp-vision-work:/work" \
             -w /project \
             espressif/idf:v5.5.6 \
             bash -lc '
               set -euo pipefail
-              export IDF_PY_BUILD_JOBS=2
 
-              git config --global --add safe.directory '*'
 
               export IDF_EXTRA_ACTIONS_PATH=/project
               export ESP_VISION_WORK_DIR=/work
@@ -61,6 +60,12 @@ jobs:
               export TMPDIR="$ESP_VISION_WORK_DIR/tmp"
               export TMP="$TMPDIR"
               export TEMP="$TMPDIR"
+
+              REAL_NINJA="$(command -v ninja)"
+              mkdir -p /work/.ci-bin
+              printf "#!/bin/sh\nexec \"%s\" -j 2 \"\$@\"\n" "$REAL_NINJA" > /work/.ci-bin/ninja
+              chmod +x /work/.ci-bin/ninja
+              export PATH="/work/.ci-bin:$PATH"
 
               idf.py \
                 --board ESP32_S3_N16R8 \
