@@ -51,6 +51,8 @@ jobs:
               set -euo pipefail
               export IDF_PY_BUILD_JOBS=2
 
+              git config --global --add safe.directory '*'
+
               export IDF_EXTRA_ACTIONS_PATH=/project
               export ESP_VISION_WORK_DIR=/work
 
