@@ -170,3 +170,67 @@ cmake_file.write_text(cmake)
 print("Binding py_quirc.c añadido al target usermod.")
 print("Componente s3_quirc añadido a IDF_COMPONENTS.")
 print("QSTR gestionado por el mecanismo estándar de MicroPython.")
+
+# Compatibilidad MicroPython NimBLE con ESP-IDF 5.5.x.
+idf_ext_path = root / "idf_ext.py"
+idf_ext_text = idf_ext_path.read_text()
+
+marker = "# ESP-VISION: patch MicroPython NimBLE symbols for ESP-IDF 5.5.\n"
+needle = "            selected = prepare_micropython_tree(board)\n"
+
+injected = '''            # ESP-VISION: patch MicroPython NimBLE symbols for ESP-IDF 5.5.
+            if idf_version().startswith("5.5"):
+                nimble_c = os.path.join(
+                    mp_build_dir(),
+                    "extmod", "nimble", "modbluetooth_nimble.c"
+                )
+
+                with open(nimble_c, encoding="utf-8") as f:
+                    nimble_text = f.read()
+
+                declarations = (
+                    "    extern uint16_t ble_hs_max_attrs;\\n",
+                    "    extern uint16_t ble_hs_max_services;\\n",
+                    "    extern uint16_t ble_hs_max_client_configs;\\n",
+                )
+
+                found = [item in nimble_text for item in declarations]
+
+                if any(found) and not all(found):
+                    raise FatalError(
+                        "NimBLE: declaraciones extern incompletas; "
+                        "no se aplica el parche."
+                    )
+
+                if all(found):
+                    for item in declarations:
+                        nimble_text = nimble_text.replace(item, "", 1)
+
+                    with open(nimble_c, "w", encoding="utf-8") as f:
+                        f.write(nimble_text)
+
+                    print(
+                        "[prepare-micropython] "
+                        "NimBLE compatibility patch applied."
+                    )
+                else:
+                    print(
+                        "[prepare-micropython] "
+                        "NimBLE declarations already absent."
+                    )
+
+'''
+
+if marker not in idf_ext_text:
+    if needle not in idf_ext_text:
+        raise RuntimeError(
+            "No se encontró el punto de inserción en idf_ext.py"
+        )
+
+    idf_ext_text = idf_ext_text.replace(
+        needle, needle + injected, 1
+    )
+    idf_ext_path.write_text(idf_ext_text)
+    print("Parche de compatibilidad NimBLE instalado.")
+else:
+    print("Parche de compatibilidad NimBLE ya instalado.")
