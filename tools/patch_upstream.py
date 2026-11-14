@@ -143,6 +143,11 @@ if(IDF_TARGET STREQUAL "esp32s3")
         ${ESP_VISION_ROOT}/modules/py_quirc.c
     )
 
+    target_include_directories(usermod_esp_vision_platform INTERFACE
+        ${ESP_VISION_ROOT}/components/s3_quirc/include
+        ${ESP_VISION_ROOT}/modules/quirc
+    )
+
     list(APPEND IDF_COMPONENTS s3_quirc)
 endif()
 """
