@@ -33,15 +33,22 @@ new = old.replace(
     1
 )
 
-assert old in s, "No se encontró el bloque USB esperado; no se modificó."
-p.write_text(s.replace(old, new, 1))
-print("Parche USB aplicado correctamente.")
+if old in s:
+    s = s.replace(old, new, 1)
+elif new not in s:
+    raise RuntimeError(
+        "No se encontró el bloque USB original ni el ya parcheado."
+    )
+
+p.write_text(s)
+print("Parche USB aplicado o ya estaba aplicado.")
 
 # PATCH: include boardconfig.h in ev_stdio.c
 # This makes ESP_VISION_EV_MUX_DEFAULT_ENABLED board-specific.
+repo_root = Path(__file__).resolve().parents[1]
 upstream = Path(sys.argv[1])
 
-board_cfg = upstream / "boards/ESP32_S3_N16R8/boardconfig.h"
+board_cfg = repo_root / "boards/ESP32_S3_N16R8/boardconfig.h"
 assert board_cfg.exists(), "No existe boardconfig.h de la placa"
 
 board_text = board_cfg.read_text()
@@ -60,3 +67,101 @@ if include not in source:
 
 ev_stdio.write_text(source)
 print("Configuración de placa conectada correctamente a ev_stdio.c")
+
+# PATCH: instalar lector QR secundario Quirc para ESP32-S3.
+from shutil import copy2, copytree
+
+repo_root = Path(__file__).resolve().parents[1]
+quirc_upstream = Path(sys.argv[1])
+
+source_modules = repo_root / "modules"
+source_component = repo_root / "components/s3_quirc"
+
+assert (source_modules / "py_quirc.c").is_file()
+assert (source_modules / "quirc/decode.c").is_file()
+assert (source_modules / "quirc/quirc.h").is_file()
+assert (source_modules / "quirc/LICENSE").is_file()
+assert (source_component / "CMakeLists.txt").is_file()
+assert (source_component / "include/s3_quirc.h").is_file()
+
+copytree(
+    source_modules / "quirc",
+    quirc_upstream / "modules/quirc",
+    dirs_exist_ok=True
+)
+
+copy2(
+    source_modules / "py_quirc.c",
+    quirc_upstream / "modules/py_quirc.c"
+)
+
+copytree(
+    source_component,
+    quirc_upstream / "components/s3_quirc",
+    dirs_exist_ok=True
+)
+
+print("Fuentes y componente Quirc instalados.")
+
+cmake_file = quirc_upstream / "micropython.cmake"
+cmake = cmake_file.read_text()
+
+def remove_marked_block(content, marker):
+    while marker in content:
+        start = content.index(marker)
+        end = content.find("\nendif()", start)
+
+        if end < 0:
+            raise RuntimeError(
+                f"No se encontró endif() para el bloque: {marker}"
+            )
+
+        end += len("\nendif()")
+        content = content[:start] + content[end:]
+
+    return content
+
+
+# Eliminar las versiones anteriores del parche, incluso si estaban
+# colocadas en el lugar incorrecto.
+cmake = remove_marked_block(
+    cmake,
+    "# ESP-VISION secondary Quirc reader (S3 only)."
+)
+
+cmake = remove_marked_block(
+    cmake,
+    "# Link ESP-VISION secondary Quirc component (S3 only)."
+)
+
+# Añadir el binding directamente al target INTERFACE del usermod.
+# usermod_gather_sources() recogerá esta fuente para compilación y QSTR.
+source_block = """
+# ESP-VISION secondary Quirc reader (S3 only).
+if(IDF_TARGET STREQUAL "esp32s3")
+    target_sources(usermod_esp_vision_platform INTERFACE
+        ${ESP_VISION_ROOT}/modules/py_quirc.c
+    )
+
+    list(APPEND IDF_COMPONENTS s3_quirc)
+endif()
+"""
+
+anchor = "target_link_libraries(usermod INTERFACE usermod_esp_vision_platform)"
+
+if cmake.count(anchor) != 1:
+    raise RuntimeError(
+        "No se encontró exactamente una declaración del enlace usermod."
+    )
+
+cmake = cmake.replace(
+    anchor,
+    source_block + "\n" + anchor,
+    1
+)
+
+cmake_file.write_text(cmake)
+
+print("Binding py_quirc.c añadido al target usermod.")
+print("Componente s3_quirc añadido a IDF_COMPONENTS.")
+print("QSTR gestionado por el mecanismo estándar de MicroPython.")
