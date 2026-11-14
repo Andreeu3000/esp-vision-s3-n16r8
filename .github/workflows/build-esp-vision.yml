@@ -3,7 +3,7 @@ name: Build ESP-VISION S3 N16R8
 on:
   workflow_dispatch:
   push:
-    branches: ["main", "master", "feature/quirc-secondary-reader-20261113-201828"]
+    branches: ["main", "master", "feature/quirc-secondary-reader-20261113-201828", "feature/imlib-file-vision-20261114"]
   pull_request:
 
 permissions:
@@ -35,6 +35,7 @@ jobs:
           cp -a boards/ESP32_S3_N16R8 \
             esp-vision/boards/ESP32_S3_N16R8
           python3 tools/patch_upstream.py esp-vision
+          python3 tools/patch_imlib.py esp-vision
 
       - name: Build firmware with ESP-IDF 5.5.6
         shell: bash
