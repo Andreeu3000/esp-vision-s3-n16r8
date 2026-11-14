@@ -168,6 +168,37 @@ def patch_selective_search(path):
     write_if_changed(path, content)
 
 
+
+def patch_array_stack_check(path):
+    if not path.is_file():
+        stop(f"No existe el archivo de compatibilidad: {path}")
+
+    content = path.read_text(encoding="utf-8")
+
+    old_include = '#include "py/stackctrl.h"'
+    new_include = '#include "py/cstack.h"'
+    old_call = "MP_STACK_CHECK();"
+    new_call = "mp_cstack_check();"
+
+    if old_include in content:
+        if content.count(old_include) != 1:
+            stop("Include antiguo de stackctrl duplicado en array.c.")
+        content = content.replace(old_include, new_include, 1)
+    elif content.count(new_include) != 1:
+        stop("No se encontró un include único de py/cstack.h en array.c.")
+
+    if old_call in content:
+        if content.count(old_call) != 1:
+            stop("MP_STACK_CHECK duplicado en array.c.")
+        content = content.replace(old_call, new_call, 1)
+    elif content.count(new_call) != 1:
+        stop("No se encontró una llamada única a mp_cstack_check en array.c.")
+
+    if "mp_stack_check" in content or "MP_STACK_CHECK" in content:
+        stop("Quedaron referencias a la API antigua de stack.")
+
+    write_if_changed(path, content)
+
 def main():
     if len(sys.argv) != 2:
         stop("Uso: python3 tools/patch_imlib.py RUTA_ESP_VISION")
@@ -209,6 +240,7 @@ def main():
 
     patch_cmake(cmake, upstream_dir)
     patch_selective_search(py_image)
+    patch_array_stack_check(imlib_dir / "compat/array.c")
 
     print()
     print("[OK] Parche de imlib aplicado.")
