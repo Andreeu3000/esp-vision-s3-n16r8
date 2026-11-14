@@ -3,7 +3,7 @@ name: Build ESP-VISION S3 N16R8
 on:
   workflow_dispatch:
   push:
-    branches: ["main", "master"]
+    branches: ["main", "master", "feature/quirc-secondary-reader-20261113-201828"]
   pull_request:
 
 permissions:
