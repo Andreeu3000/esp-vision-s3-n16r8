@@ -39,6 +39,24 @@ def stop(message):
     raise SystemExit("[ERROR] " + message)
 
 
+def replace_once(content, old, new, description):
+    old_count = content.count(old)
+    new_count = content.count(new)
+
+    if old_count == 1 and new_count == 0:
+        print("[APLICANDO]", description)
+        return content.replace(old, new, 1)
+
+    if old_count == 0 and new_count == 1:
+        print("[OK YA APLICADO]", description)
+        return content
+
+    stop(
+        f"{description}: estado inesperado "
+        f"(original={old_count}, parche={new_count})."
+    )
+
+
 def write_if_changed(path, content):
     old = path.read_text(encoding="utf-8")
     if old != content:
@@ -199,6 +217,55 @@ def patch_array_stack_check(path):
 
     write_if_changed(path, content)
 
+
+
+def patch_png_write(path):
+    if not path.is_file():
+        stop(f"No existe el PNG upstream: {path}")
+
+    content = path.read_text(encoding="utf-8")
+
+    old = """        file_write(&fp, out.pixels, out.size);
+        fb_free(); // frees alloc in png_compress()"""
+
+    new = """        file_write(&fp, out.pixels, out.size);
+        // png_compress() allocates this buffer through LodePNG/UMM.
+        // fb_free() belongs to a different allocator.
+        lodepng_free(out.pixels);"""
+
+    content = replace_once(content, old, new, "Liberacion correcta del buffer PNG")
+    write_if_changed(path, content)
+
+
+def patch_image_save_umm_cleanup(path):
+    if not path.is_file():
+        stop(f"No existe py_image.c: {path}")
+
+    content = path.read_text(encoding="utf-8")
+
+    start = content.find("static mp_obj_t py_image_save(")
+    end = content.find(
+        "static MP_DEFINE_CONST_FUN_OBJ_KW(py_image_save_obj",
+        start
+    )
+    if start < 0 or end < 0:
+        stop("No se pudo delimitar py_image_save().")
+
+    block = content[start:end]
+
+    old = "py_image_alloc_cleanup_begin(&cleanup, false);"
+    new = "py_image_alloc_cleanup_begin(&cleanup, true);"
+
+    block = replace_once(
+        block, old, new,
+        "Liberacion de memoria UMM temporal en Image.save"
+    )
+
+    content = content[:start] + block + content[end:]
+    write_if_changed(path, content)
+
+
+
 def main():
     if len(sys.argv) != 2:
         stop("Uso: python3 tools/patch_imlib.py RUTA_ESP_VISION")
@@ -241,6 +308,8 @@ def main():
     patch_cmake(cmake, upstream_dir)
     patch_selective_search(py_image)
     patch_array_stack_check(imlib_dir / "compat/array.c")
+    patch_png_write(upstream_dir / "png.c")
+    patch_image_save_umm_cleanup(py_image)
 
     print()
     print("[OK] Parche de imlib aplicado.")
