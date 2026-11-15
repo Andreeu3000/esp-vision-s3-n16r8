@@ -225,9 +225,9 @@ injected = '''            # ESP-VISION: patch MicroPython NimBLE symbols for ESP
 
                     init_block = nimble_text[init_start:deinit_start]
 
-                    early_call = "    nimble_reset_gatts_bss();\n"
+                    early_call = "    nimble_reset_gatts_bss();\\n"
                     init_marker = (
-                        "    #endif\n"
+                        "    #endif\\n"
                         "    ble_hs_cfg.reset_cb = reset_cb;"
                     )
 
@@ -243,10 +243,10 @@ injected = '''            # ESP-VISION: patch MicroPython NimBLE symbols for ESP
                         )
                         init_block = init_block.replace(
                             init_marker,
-                            "    #endif\n"
-                            "\n"
-                            "    nimble_reset_gatts_bss();\n"
-                            "\n"
+                            "    #endif\\n"
+                            "\\n"
+                            "    nimble_reset_gatts_bss();\\n"
+                            "\\n"
                             "    ble_hs_cfg.reset_cb = reset_cb;",
                             1
                         )
