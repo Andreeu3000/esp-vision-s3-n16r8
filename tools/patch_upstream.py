@@ -307,3 +307,45 @@ if marker not in idf_ext_text:
     print("Parche de compatibilidad NimBLE instalado.")
 else:
     print("Parche de compatibilidad NimBLE ya instalado.")
+
+# ============================================================
+# PATCH: EV-MUX EVENTS ONLY WHEN MUX IS ENABLED
+# ============================================================
+
+p = root / "platform/ev_control_transport.c"
+source = p.read_text()
+
+old = """{
+    ev_link_ref_t target;
+    const char *session_id = NULL;
+    uint32_t vm_epoch = 0;
+    uint32_t tx_vm_epoch = 0;
+    // Keep the event's session storage alive until submit has copied it.
+    ev_session_snapshot_t snapshot;"""
+
+new = """{
+    // Never inject EV-MUX events into the legacy raw REPL.
+    // Events are allowed again when EV-MUX is explicitly enabled.
+    if ((type != NULL) && (strcmp(type, "event") == 0) &&
+            !ev_stdio_mux_enabled()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ev_link_ref_t target;
+    const char *session_id = NULL;
+    uint32_t vm_epoch = 0;
+    uint32_t tx_vm_epoch = 0;
+    // Keep the event's session storage alive until submit has copied it.
+    ev_session_snapshot_t snapshot;"""
+
+if new not in source:
+    if source.count(old) != 1:
+        raise RuntimeError(
+            "No se encontró exactamente el bloque esperado "
+            "en ev_control_transport.c. No se modificó."
+        )
+
+    source = source.replace(old, new, 1)
+    p.write_text(source)
+
+print("[OK] EV-MUX events gated by runtime state")
