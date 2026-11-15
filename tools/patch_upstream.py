@@ -226,29 +226,28 @@ injected = '''            # ESP-VISION: patch MicroPython NimBLE symbols for ESP
                     init_block = nimble_text[init_start:deinit_start]
 
                     early_call = "    nimble_reset_gatts_bss();\\n"
-                    init_marker = (
-                        "    #endif\\n"
-                        "    ble_hs_cfg.reset_cb = reset_cb;"
-                    )
+                    callback_marker = "ble_hs_cfg.reset_cb = reset_cb;"
+
+                    port_pos = init_block.find("nimble_port_init();")
+                    callback_pos = init_block.find(callback_marker)
 
                     if init_block.count(early_call) == 1:
-                        if init_block.count(init_marker) != 1:
+                        if port_pos < 0 or callback_pos <= port_pos:
                             raise RuntimeError(
-                                "No se encontró el punto seguro "
-                                "después de nimble_port_init()."
+                                "nimble_port_init() o callback "
+                                "en una posición inesperada."
                             )
 
                         init_block = init_block.replace(
                             early_call, "", 1
                         )
-                        init_block = init_block.replace(
-                            init_marker,
-                            "    #endif\\n"
-                            "\\n"
-                            "    nimble_reset_gatts_bss();\\n"
-                            "\\n"
-                            "    ble_hs_cfg.reset_cb = reset_cb;",
-                            1
+
+                        callback_pos = init_block.find(callback_marker)
+
+                        init_block = (
+                            init_block[:callback_pos]
+                            + "    nimble_reset_gatts_bss();\\n\\n"
+                            + init_block[callback_pos:]
                         )
 
                         nimble_text = (
@@ -264,8 +263,11 @@ injected = '''            # ESP-VISION: patch MicroPython NimBLE symbols for ESP
 
                     elif (
                         init_block.count("nimble_reset_gatts_bss();") == 1
-                        and init_block.find("nimble_reset_gatts_bss();")
-                        > init_block.find("nimble_port_init();")
+                        and port_pos >= 0
+                        and (
+                            init_block.find("nimble_reset_gatts_bss();")
+                            > port_pos
+                        )
                     ):
                         print(
                             "[prepare-micropython] "
