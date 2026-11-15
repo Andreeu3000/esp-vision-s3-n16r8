@@ -206,6 +206,77 @@ injected = '''            # ESP-VISION: patch MicroPython NimBLE symbols for ESP
                     for item in declarations:
                         nimble_text = nimble_text.replace(item, "", 1)
 
+                    # ESP-IDF 5.5: los contadores GATT son macros
+                    # que acceden al contexto interno de NimBLE.
+                    # Inicializar NimBLE antes de reiniciarlos.
+                    init_start = nimble_text.find(
+                        "int mp_bluetooth_init(void) {"
+                    )
+                    deinit_start = nimble_text.find(
+                        "int mp_bluetooth_deinit(void) {",
+                        init_start
+                    )
+
+                    if init_start < 0 or deinit_start < 0:
+                        raise RuntimeError(
+                            "No se encontraron los límites de "
+                            "mp_bluetooth_init()."
+                        )
+
+                    init_block = nimble_text[init_start:deinit_start]
+
+                    early_call = "    nimble_reset_gatts_bss();\n"
+                    init_marker = (
+                        "    #endif\n"
+                        "    ble_hs_cfg.reset_cb = reset_cb;"
+                    )
+
+                    if init_block.count(early_call) == 1:
+                        if init_block.count(init_marker) != 1:
+                            raise RuntimeError(
+                                "No se encontró el punto seguro "
+                                "después de nimble_port_init()."
+                            )
+
+                        init_block = init_block.replace(
+                            early_call, "", 1
+                        )
+                        init_block = init_block.replace(
+                            init_marker,
+                            "    #endif\n"
+                            "\n"
+                            "    nimble_reset_gatts_bss();\n"
+                            "\n"
+                            "    ble_hs_cfg.reset_cb = reset_cb;",
+                            1
+                        )
+
+                        nimble_text = (
+                            nimble_text[:init_start]
+                            + init_block
+                            + nimble_text[deinit_start:]
+                        )
+
+                        print(
+                            "[prepare-micropython] "
+                            "NimBLE GATT reset moved after init."
+                        )
+
+                    elif (
+                        init_block.count("nimble_reset_gatts_bss();") == 1
+                        and init_block.find("nimble_reset_gatts_bss();")
+                        > init_block.find("nimble_port_init();")
+                    ):
+                        print(
+                            "[prepare-micropython] "
+                            "NimBLE GATT reset already relocated."
+                        )
+                    else:
+                        raise RuntimeError(
+                            "La llamada GATT tiene una disposición "
+                            "inesperada; se cancela el parche."
+                        )
+
                     with open(nimble_c, "w", encoding="utf-8") as f:
                         f.write(nimble_text)
 
