@@ -26,7 +26,7 @@ def patch_micropython_tree(mp_root: str | Path) -> None:
     device_init = usb_pkg / "device" / "__init__.py"
     device_core = usb_pkg / "device" / "core.py"
 
-    for required in (usb_c, common_cmake, board_h, device_init, device_core):
+    for required in (usb_c, common_cmake, board_h, device_core):
         if not required.is_file():
             raise RuntimeError(f"USB role patch: falta el archivo esperado: {required}")
 
