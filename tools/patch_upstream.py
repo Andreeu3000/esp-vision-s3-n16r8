@@ -559,3 +559,129 @@ _usb_core_path.write_text(_usb_core_source, encoding="utf-8")
 _usb_mouse_path.write_text(_usb_mouse_source, encoding="utf-8")
 
 print("[OK] Parches USB HID preparados.")
+
+
+# PATCH_USB_HID_IDF_EXPORT_FIX
+# Apply HID patches to the generated MicroPython tree after git archive.
+_idf_usb_marker = "# PATCH_USB_HID_RECONNECT_SAFE_IN_PREPARED_TREE"
+
+_idf_usb_injected = r"""        # PATCH_USB_HID_RECONNECT_SAFE_IN_PREPARED_TREE
+        usb_root = os.path.join(
+            mp_build_dir(), "lib", "micropython-lib", "micropython", "usb"
+        )
+        usb_core_path = os.path.join(
+            usb_root, "usb-device", "usb", "device", "core.py"
+        )
+        usb_mouse_path = os.path.join(
+            usb_root, "usb-device-mouse", "usb", "device", "mouse.py"
+        )
+
+        if not os.path.isfile(usb_core_path) or not os.path.isfile(usb_mouse_path):
+            raise FatalError(
+                "USB HID patch: no se encontraron las fuentes exportadas: "
+                + usb_core_path + " / " + usb_mouse_path
+            )
+
+        with open(usb_core_path, encoding="utf-8") as file:
+            usb_core_source = file.read()
+
+        old_pending = (
+            "        return self._ep_cbs[ep_addr] or "
+            "(self._cb_ep == ep_addr and self._cb_thread != get_ident())"
+        )
+        new_pending = (
+            "        return self._ep_cbs.get(ep_addr, False) or "
+            "(self._cb_ep == ep_addr and self._cb_thread != get_ident())"
+        )
+
+        if old_pending in usb_core_source:
+            if usb_core_source.count(old_pending) != 1:
+                raise FatalError("USB HID: acceso antiguo a _ep_cbs duplicado.")
+            usb_core_source = usb_core_source.replace(
+                old_pending, new_pending, 1
+            )
+        elif new_pending not in usb_core_source:
+            raise FatalError("USB HID: no coincide _xfer_pending() en core.py")
+
+        with open(usb_mouse_path, encoding="utf-8") as file:
+            usb_mouse_source = file.read()
+
+        if "import time\n" not in usb_mouse_source:
+            import_anchor = "import machine\n"
+            if usb_mouse_source.count(import_anchor) != 1:
+                raise FatalError("USB HID: no se encontró import machine en mouse.py")
+            usb_mouse_source = usb_mouse_source.replace(
+                import_anchor, import_anchor + "import time\n", 1
+            )
+
+        mouse_pattern = re.compile(
+            r"(?ms)^    def send_report\(self, dx=0, dy=0\):\n"
+            r".*?^        return super\(\)\.send_report\(self\._buf\)\n"
+        )
+
+        mouse_new_fn = (
+            "    def send_report(self, dx=0, dy=0, timeout_ms=100):\n"
+            "        b = 0\n"
+            "        if self._l:\n"
+            "            b |= 1 << 0\n"
+            "        if self._r:\n"
+            "            b |= 1 << 1\n"
+            "        if self._m:\n"
+            "            b |= 1 << 2\n"
+            "        deadline = time.ticks_add(time.ticks_ms(), timeout_ms)\n"
+            "        while self.busy():\n"
+            "            if time.ticks_diff(deadline, time.ticks_ms()) <= 0:\n"
+            "                return False\n"
+            "            machine.idle()\n"
+            "        if not self.is_open():\n"
+            "            return False\n"
+            "        struct.pack_into('Bbb', self._buf, 0, b, dx, dy)\n"
+            "        return super().send_report(self._buf, timeout_ms=timeout_ms)\n"
+        )
+
+        mouse_matches = list(mouse_pattern.finditer(usb_mouse_source))
+
+        if len(mouse_matches) == 1:
+            usb_mouse_source = mouse_pattern.sub(
+                lambda match: mouse_new_fn, usb_mouse_source, count=1
+            )
+        elif len(mouse_matches) == 0:
+            signature = "    def send_report(self, dx=0, dy=0, timeout_ms=100):"
+            if (
+                usb_mouse_source.count(signature) != 1
+                or "deadline = time.ticks_add(time.ticks_ms(), timeout_ms)" not in usb_mouse_source
+            ):
+                raise FatalError("USB HID: no coincide send_report() en mouse.py")
+        else:
+            raise FatalError("USB HID: hay funciones send_report antiguas duplicadas.")
+
+        with open(usb_core_path, "w", encoding="utf-8") as file:
+            file.write(usb_core_source)
+
+        with open(usb_mouse_path, "w", encoding="utf-8") as file:
+            file.write(usb_mouse_source)
+
+        print("[prepare-micropython] USB HID reconnect patches verified.")
+"""
+
+_idf_usb_source = _idf_ext_path.read_text(encoding="utf-8")
+
+if _idf_usb_marker not in _idf_usb_source:
+    _idf_usb_anchor = "        return os.path.relpath(src, root)"
+
+    if _idf_usb_source.count(_idf_usb_anchor) != 1:
+        raise RuntimeError(
+            "USB HID: no se encontró exactamente el final de prepare_micropython_tree()."
+        )
+
+    _idf_usb_source = _idf_usb_source.replace(
+        _idf_usb_anchor,
+        _idf_usb_injected + _idf_usb_anchor,
+        1,
+    )
+    _idf_ext_path.write_text(_idf_usb_source, encoding="utf-8")
+    print("[OK] USB HID integrado en el árbol generado de MicroPython.")
+else:
+    if _idf_usb_source.count(_idf_usb_marker) != 1:
+        raise RuntimeError("USB HID: marcador duplicado en idf_ext.py.")
+    print("[INFO] USB HID ya está integrado en idf_ext.py.")
