@@ -503,3 +503,38 @@ else:
     _idf_ext_path.write_text(_idf_usb, encoding="utf-8")
 
 print("[OK] USB HID: integración de idf_ext.py verificada.")
+
+# PATCH_USB_ROLE_SWITCH_INTEGRATION
+_usb_role_helper_source = repo_root / "tools/usb_role_patch.py"
+_usb_role_c_source = repo_root / "modules/py_usb_role.c"
+_usb_role_tools = root / "tools"
+_usb_role_tools.mkdir(parents=True, exist_ok=True)
+if not _usb_role_helper_source.is_file() or not _usb_role_c_source.is_file():
+    raise RuntimeError("Faltan tools/usb_role_patch.py o modules/py_usb_role.c")
+copy2(_usb_role_helper_source, _usb_role_tools / "usb_role_patch.py")
+copy2(_usb_role_c_source, _usb_role_tools / "py_usb_role.c")
+
+_idf_role_source = _idf_ext_path.read_text(encoding="utf-8")
+_idf_role_marker = "# PATCH_USB_ROLE_SWITCH_PREPARED_TREE"
+_idf_role_anchor = "        return os.path.relpath(src, root)"
+if _idf_role_marker not in _idf_role_source:
+    if _idf_role_source.count(_idf_role_anchor) != 1:
+        raise RuntimeError("USB role patch: ancla prepare_micropython_tree no única")
+    _idf_role_insert = r"""        # PATCH_USB_ROLE_SWITCH_PREPARED_TREE
+        import sys as _usb_role_sys
+        _usb_role_tools = os.path.join(root, "tools")
+        if _usb_role_tools not in _usb_role_sys.path:
+            _usb_role_sys.path.insert(0, _usb_role_tools)
+        from usb_role_patch import patch_micropython_tree
+        try:
+            patch_micropython_tree(mp_build_dir())
+        except Exception as exc:
+            raise FatalError("USB role switch patch failed: " + str(exc)) from exc
+"""
+    _idf_role_source = _idf_role_source.replace(
+        _idf_role_anchor, _idf_role_insert + _idf_role_anchor, 1
+    )
+    _idf_ext_path.write_text(_idf_role_source, encoding="utf-8")
+elif _idf_role_source.count(_idf_role_marker) != 1:
+    raise RuntimeError("USB role patch: marcador duplicado en idf_ext.py")
+print("[OK] USB Device/Host role-switch helper integrado en idf_ext.py.")
