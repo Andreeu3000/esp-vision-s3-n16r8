@@ -349,3 +349,30 @@ if new not in source:
     p.write_text(source)
 
 print("[OK] EV-MUX events gated by runtime state")
+
+
+# PATCH_TRACE_ISR_EXIT_TO_SCHEDULER
+# Define el hook antes de que FreeRTOS incluya portmacro.h.
+from pathlib import Path as _PatchPath
+import sys as _PatchSys
+
+_msc_file = _PatchPath(_PatchSys.argv[1]) / "platform/storage_writer_msc.c"
+
+if not _msc_file.is_file():
+    raise RuntimeError(
+        f"No se encontró el archivo esperado: {_msc_file}"
+    )
+
+_msc_source = _msc_file.read_text()
+_msc_macro = "#ifndef traceISR_EXIT_TO_SCHEDULER\n#define traceISR_EXIT_TO_SCHEDULER()\n#endif\n"
+
+if "PATCH_TRACE_ISR_EXIT_TO_SCHEDULER" not in _msc_source:
+    if "traceISR_EXIT_TO_SCHEDULER" not in _msc_source:
+        _msc_file.write_text(
+            _msc_macro + "\n/* PATCH_TRACE_ISR_EXIT_TO_SCHEDULER */\n" + _msc_source
+        )
+        print("[OK] Parche aplicado a storage_writer_msc.c")
+    else:
+        print("[INFO] El hook ya está definido en storage_writer_msc.c")
+else:
+    print("[INFO] storage_writer_msc.c ya tiene el parche")
