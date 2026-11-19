@@ -429,12 +429,133 @@ _idf_insert = r"""        merge_board_component_manifest(dst, board)
 
         return os.path.relpath(src, root)"""
 
-if _idf_source.count(_idf_anchor) != 1:
+_idf_patch_marker = "# PATCH_FREERTOS_ISR_TRACE_MICROPYTHON_PORT"
+_anchor_count = _idf_source.count(_idf_anchor)
+_marker_count = _idf_source.count(_idf_patch_marker)
+
+if _anchor_count == 1 and _marker_count == 0:
+    _idf_source = _idf_source.replace(_idf_anchor, _idf_insert, 1)
+    _idf_ext_path.write_text(_idf_source)
+    print("[OK] idf_ext.py preparado para parchear mpconfigport.h")
+elif _anchor_count == 0 and _marker_count == 1:
+    print("[INFO] idf_ext.py ya tiene el parche FreeRTOS")
+else:
     raise RuntimeError(
-        "No se encontró exactamente el bloque esperado en idf_ext.py"
+        f"Estado inesperado en idf_ext.py: "
+        f"anchor={_anchor_count}, marker={_marker_count}"
     )
 
-_idf_source = _idf_source.replace(_idf_anchor, _idf_insert, 1)
-_idf_ext_path.write_text(_idf_source)
+# PATCH_USB_HID_RECONNECT_SAFE
+# Make USB HID transfers safe across host reset and reconnection.
+_usb_mp_lib = root / "lib/micropython/lib/micropython-lib/micropython/usb"
 
-print("[OK] idf_ext.py preparado para parchear mpconfigport.h")
+_usb_core_path = _usb_mp_lib / "usb-device/usb/device/core.py"
+_usb_mouse_path = _usb_mp_lib / "usb-device-mouse/usb/device/mouse.py"
+
+for _usb_path in (_usb_core_path, _usb_mouse_path):
+    if not _usb_path.is_file():
+        raise RuntimeError(f"No se encontró el módulo USB esperado: {_usb_path}")
+
+# Fix endpoint lookup after _reset_cb() clears _ep_cbs.
+_usb_core_source = _usb_core_path.read_text(encoding="utf-8")
+
+_usb_old_pending = (
+    "        return self._ep_cbs[ep_addr] or "
+    "(self._cb_ep == ep_addr and self._cb_thread != get_ident())"
+)
+_usb_new_pending = (
+    "        return self._ep_cbs.get(ep_addr, False) or "
+    "(self._cb_ep == ep_addr and self._cb_thread != get_ident())"
+)
+
+if _usb_old_pending in _usb_core_source:
+    if _usb_core_source.count(_usb_old_pending) != 1:
+        raise RuntimeError("Hay múltiples accesos antiguos a _ep_cbs.")
+    _usb_core_source = _usb_core_source.replace(
+        _usb_old_pending, _usb_new_pending, 1
+    )
+    print("[OK] USB HID: acceso seguro a _ep_cbs.")
+elif _usb_new_pending in _usb_core_source:
+    print("[INFO] USB HID: acceso seguro a _ep_cbs ya aplicado.")
+else:
+    raise RuntimeError("No se encontró el bloque esperado en usb/device/core.py")
+
+# Give the mouse transfer wait loop a finite timeout.
+_usb_mouse_source = _usb_mouse_path.read_text(encoding="utf-8")
+
+if "import time\n" not in _usb_mouse_source:
+    _usb_import_anchor = "import machine\n"
+    if _usb_mouse_source.count(_usb_import_anchor) != 1:
+        raise RuntimeError("No se encontró el import de machine en mouse.py")
+    _usb_mouse_source = _usb_mouse_source.replace(
+        _usb_import_anchor,
+        _usb_import_anchor + "import time\n",
+        1,
+    )
+
+_usb_old_mouse_fn = """    def send_report(self, dx=0, dy=0):
+        b = 0
+        if self._l:
+            b |= 1 << 0
+        if self._r:
+            b |= 1 << 1
+        if self._m:
+            b |= 1 << 2
+
+        # Wait for any pending report to be sent to the host
+        # before updating contents of _buf.
+        #
+        # This loop can be removed if you don't care about possibly missing a
+        # transient report, the final report buffer contents will always be the
+        # last one sent to the host (it just might lose one of the ones in the
+        # middle).
+        while self.busy():
+            machine.idle()
+
+        struct.pack_into("Bbb", self._buf, 0, b, dx, dy)
+
+        return super().send_report(self._buf)
+"""
+
+_usb_new_mouse_fn = """    def send_report(self, dx=0, dy=0, timeout_ms=100):
+        b = 0
+        if self._l:
+            b |= 1 << 0
+        if self._r:
+            b |= 1 << 1
+        if self._m:
+            b |= 1 << 2
+
+        # Wait for the previous report, but never wait indefinitely.
+        deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
+        while self.busy():
+            if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                return False
+            machine.idle()
+
+        # The host may have disconnected while this report was waiting.
+        if not self.is_open():
+            return False
+
+        struct.pack_into("Bbb", self._buf, 0, b, dx, dy)
+
+        return super().send_report(self._buf, timeout_ms=timeout_ms)
+"""
+
+if _usb_old_mouse_fn in _usb_mouse_source:
+    if _usb_mouse_source.count(_usb_old_mouse_fn) != 1:
+        raise RuntimeError("Hay múltiples funciones send_report antiguas en mouse.py")
+    _usb_mouse_source = _usb_mouse_source.replace(
+        _usb_old_mouse_fn, _usb_new_mouse_fn, 1
+    )
+    print("[OK] USB HID: timeout para transferencias del mouse.")
+elif _usb_new_mouse_fn in _usb_mouse_source:
+    print("[INFO] USB HID: timeout del mouse ya aplicado.")
+else:
+    raise RuntimeError("No coincide la función send_report esperada en mouse.py")
+
+# Write only after both source transformations have been validated.
+_usb_core_path.write_text(_usb_core_source, encoding="utf-8")
+_usb_mouse_path.write_text(_usb_mouse_source, encoding="utf-8")
+
+print("[OK] Parches USB HID preparados.")
