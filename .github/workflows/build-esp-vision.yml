@@ -69,6 +69,23 @@ jobs:
               chmod +x /work/.ci-bin/ninja
               export PATH="/work/.ci-bin:$PATH"
 
+              # Configurar ESP-IDF y descargar componentes.
+              idf.py \
+                --board ESP32_S3_N16R8 \
+                -B "$ESP_VISION_WORK_DIR/build/ESP32_S3_N16R8" \
+                reconfigure
+              
+              # Aplicar el parche del controlador TinyUSB DCD.
+              DCD="$ESP_VISION_WORK_DIR/build/ESP32_S3_N16R8/managed_components/espressif__tinyusb/src/portable/espressif/esp32sx/dcd_esp32sx.c"
+              
+              if [ ! -f "$DCD" ]; then
+                echo "ERROR: no se encontró el controlador DCD: $DCD"
+                exit 1
+              fi
+              
+              python3 /project/tools/patch_tinyusb_dcd.py "$DCD"
+              
+              # Compilar firmware.
               idf.py \
                 --board ESP32_S3_N16R8 \
                 -B "$ESP_VISION_WORK_DIR/build/ESP32_S3_N16R8" \
