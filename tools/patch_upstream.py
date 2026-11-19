@@ -376,3 +376,65 @@ if "PATCH_TRACE_ISR_EXIT_TO_SCHEDULER" not in _msc_source:
         print("[INFO] El hook ya está definido en storage_writer_msc.c")
 else:
     print("[INFO] storage_writer_msc.c ya tiene el parche")
+
+# PATCH_FREERTOS_ISR_TRACE_MICROPYTHON_PORT
+# Patch the generated MicroPython port during preparation.
+
+_idf_ext_path = root / "idf_ext.py"
+
+if not _idf_ext_path.is_file():
+    raise RuntimeError(f"No se encontró {_idf_ext_path}")
+
+_idf_source = _idf_ext_path.read_text()
+
+_idf_anchor = """        merge_board_component_manifest(dst, board)
+
+        return os.path.relpath(src, root)"""
+
+_idf_insert = r"""        merge_board_component_manifest(dst, board)
+
+        # PATCH_FREERTOS_ISR_TRACE_MICROPYTHON_PORT
+        mpconfigport_path = os.path.join(mp_port_dir(), "mpconfigport.h")
+
+        with open(mpconfigport_path, encoding="utf-8") as file:
+            mpconfigport_source = file.read()
+
+        trace_marker = "/* PATCH_FREERTOS_ISR_EXIT_TO_SCHEDULER */"
+        trace_macro = (
+            "#ifndef traceISR_EXIT_TO_SCHEDULER\n"
+            "#define traceISR_EXIT_TO_SCHEDULER()\n"
+            "#endif\n"
+        )
+
+        if trace_marker not in mpconfigport_source:
+            freertos_include = '#include "freertos/FreeRTOS.h"'
+
+            if mpconfigport_source.count(freertos_include) != 1:
+                raise FatalError(
+                    "Expected exactly one FreeRTOS.h include in mpconfigport.h"
+                )
+
+            mpconfigport_source = mpconfigport_source.replace(
+                freertos_include,
+                trace_marker + "\n" + trace_macro + "\n" + freertos_include,
+                1,
+            )
+
+            with open(mpconfigport_path, "w", encoding="utf-8") as file:
+                file.write(mpconfigport_source)
+
+            print("[prepare-micropython] FreeRTOS trace hook applied")
+        else:
+            print("[prepare-micropython] FreeRTOS trace hook already patched")
+
+        return os.path.relpath(src, root)"""
+
+if _idf_source.count(_idf_anchor) != 1:
+    raise RuntimeError(
+        "No se encontró exactamente el bloque esperado en idf_ext.py"
+    )
+
+_idf_source = _idf_source.replace(_idf_anchor, _idf_insert, 1)
+_idf_ext_path.write_text(_idf_source)
+
+print("[OK] idf_ext.py preparado para parchear mpconfigport.h")
