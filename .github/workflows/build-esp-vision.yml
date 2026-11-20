@@ -43,6 +43,8 @@ jobs:
           set -euo pipefail
 
           mkdir -p "$RUNNER_TEMP/esp-vision-work"
+          mkdir -p esp-vision/tools
+          cp tools/patch_tinyusb_dcd.py esp-vision/tools/patch_tinyusb_dcd.py
 
           docker run --rm \
             -e IDF_GIT_SAFE_DIR='*' \
