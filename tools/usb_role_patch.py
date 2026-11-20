@@ -22,9 +22,26 @@ def patch_micropython_tree(mp_root: str | Path) -> None:
     usb_c = port / "usb.c"
     common_cmake = port / "esp32_common.cmake"
     board_h = port / "boards" / "ESP32_S3_N16R8" / "mpconfigboard.h"
-    usb_pkg = mp_root / "lib" / "micropython-lib" / "micropython" / "usb"
-    device_init = usb_pkg / "device" / "__init__.py"
-    device_core = usb_pkg / "device" / "core.py"
+    candidate_device_pkgs = [
+        mp_root / "lib" / "micropython-lib" / "micropython" / "usb" / "usb-device" / "usb" / "device",
+        mp_root / "lib" / "micropython-lib" / "usb-device" / "usb" / "device",
+        mp_root.parent / "micropython-lib" / "micropython" / "usb" / "usb-device" / "usb" / "device",
+        mp_root.parent / "lib" / "micropython-lib" / "micropython" / "usb" / "usb-device" / "usb" / "device",
+    ]
+    device_pkg = next((d for d in candidate_device_pkgs if (d / "core.py").is_file()), None)
+    if device_pkg is None:
+        for base in (mp_root, mp_root.parent):
+            if base.exists():
+                found = next(base.rglob("usb-device/usb/device/core.py"), None)
+                if found is not None:
+                    device_pkg = found.parent
+                    break
+    if device_pkg is None:
+        device_pkg = mp_root / "lib" / "micropython-lib" / "micropython" / "usb" / "usb-device" / "usb" / "device"
+
+    device_init = device_pkg / "__init__.py"
+    device_core = device_pkg / "core.py"
+    usb_base = device_pkg.parent
 
     for required in (usb_c, common_cmake, board_h, device_core):
         if not required.is_file():
@@ -128,7 +145,7 @@ def connect():
 '''
     _write_once(device_init, api_code, api_marker)
 
-    host_py = usb_pkg / "host.py"
+    host_py = usb_base / "host.py"
     host_code = '''"""USB Host role control for ESP32-S3."""
 from _usb_role import host_connect as _host_connect
 from _usb_role import host_disconnect as _host_disconnect
@@ -154,7 +171,7 @@ def device_count():
 '''
     _write_once(host_py, host_code, '"""USB Host role control for ESP32-S3."""')
 
-    root_init = usb_pkg / "__init__.py"
+    root_init = usb_base / "__init__.py"
     root_code = '''"""USB Device and Host role APIs."""
 from . import device, host
 '''
