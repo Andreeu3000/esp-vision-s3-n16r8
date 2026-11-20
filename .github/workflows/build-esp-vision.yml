@@ -36,6 +36,8 @@ jobs:
             esp-vision/boards/ESP32_S3_N16R8
           python3 tools/patch_upstream.py esp-vision
           python3 tools/patch_imlib.py esp-vision
+          mkdir -p esp-vision/tools
+          cp -f tools/patch_tinyusb_dcd.py esp-vision/tools/patch_tinyusb_dcd.py
 
       - name: Build firmware with ESP-IDF 5.5.6
         shell: bash
