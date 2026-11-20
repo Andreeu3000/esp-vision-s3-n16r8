@@ -80,6 +80,21 @@ def patch_micropython_tree(mp_root: str | Path) -> None:
             )
 
         phy_release = """
+/* PATCH_USB_ROLE_PHY_INIT */
+esp_err_t mp_usb_phy_init_device(void) {
+    if (phy_hdl != NULL) {
+        return ESP_OK;
+    }
+
+    static const usb_phy_config_t phy_conf = {
+        .controller = USB_PHY_CTRL_OTG,
+        .otg_mode = USB_OTG_MODE_DEVICE,
+        .target = USB_PHY_TARGET_INT,
+    };
+
+    return usb_new_phy(&phy_conf, &phy_hdl);
+}
+
 /* PATCH_USB_ROLE_PHY_RELEASE */
 esp_err_t mp_usb_phy_deinit(void) {
     if (phy_hdl == NULL) {
@@ -119,17 +134,26 @@ from _usb_role import device_started as _usb_role_device_started
 from _usb_role import device_release as _usb_role_device_release
 
 def disconnect():
-    """Fully stop USB Device mode and release TinyUSB plus the USB PHY."""
+    """Stop USB Device and release TinyUSB plus the USB PHY."""
     dev = _usb_role_core.get()
-    dev.active(False)
+    if dev.active():
+        dev.active(False)
     return _usb_role_device_release()
 
 def connect():
-    """Start the configured USB Device interfaces again."""
+    """Reconnect the configured runtime USB Device."""
     dev = _usb_role_core.get()
+
+    if not dev._itfs:
+        raise OSError(
+            "USB_DEVICE_NOT_CONFIGURED: configure at least one interface before connect()"
+        )
+
     _usb_role_device_prepare()
+
     if not dev.active():
         dev.active(True)
+
     _usb_role_device_started()
     return True
 '''

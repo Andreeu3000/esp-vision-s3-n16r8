@@ -12,6 +12,7 @@
 
 #if CONFIG_IDF_TARGET_ESP32S3 && MICROPY_HW_ENABLE_USBDEV
 
+extern esp_err_t mp_usb_phy_init_device(void);
 extern esp_err_t mp_usb_phy_deinit(void);
 
 #define USB_HOST_ALL_FREE_BIT   (1U << 0)
@@ -56,6 +57,13 @@ static mp_obj_t usb_role_device_prepare(void) {
     if (s_host_installed) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("USB_HOST_ACTIVE: disconnect Host first"));
     }
+
+    // Recreate the ESP32-S3 internal PHY before TinyUSB initializes its DCD.
+    esp_err_t err = mp_usb_phy_init_device();
+    if (err != ESP_OK) {
+        usb_role_raise_idf_error("USB_DEVICE_PHY_INIT_FAILED", err);
+    }
+
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(usb_role_device_prepare_obj, usb_role_device_prepare);
