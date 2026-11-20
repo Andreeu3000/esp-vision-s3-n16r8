@@ -530,6 +530,15 @@ if _idf_role_marker not in _idf_role_source:
             patch_micropython_tree(mp_build_dir())
         except Exception as exc:
             raise FatalError("USB role switch patch failed: " + str(exc)) from exc
+
+        # PATCH_USB_HID_CONVENIENCE_MODULE
+        _usb_hid_src = os.path.join(root, "modules", "usb_hid.py")
+        _usb_hid_dst_dir = os.path.join(mp_port_dir(), "modules")
+        if not os.path.isfile(_usb_hid_src):
+            raise FatalError("USB HID helper is missing: " + _usb_hid_src)
+        os.makedirs(_usb_hid_dst_dir, exist_ok=True)
+        shutil.copy2(_usb_hid_src, os.path.join(_usb_hid_dst_dir, "usb_hid.py"))
+        print("[prepare-micropython] USB HID convenience module frozen.")
 """
     _idf_role_source = _idf_role_source.replace(
         _idf_role_anchor, _idf_role_insert + _idf_role_anchor, 1
@@ -539,18 +548,3 @@ elif _idf_role_source.count(_idf_role_marker) != 1:
     raise RuntimeError("USB role patch: marcador duplicado en idf_ext.py")
 print("[OK] USB Device/Host role-switch helper integrado en idf_ext.py.")
 
-
-# PATCH_USB_HID_CONVENIENCE_MODULE
-# Freeze the high-level keyboard/mouse/Consumer Control helper via the
-# existing manifest freeze("$(PORT_DIR)/modules") entry.
-_usb_hid_source = repo_root / "modules/usb_hid.py"
-_usb_hid_target_dir = root / "ports/esp32/modules"
-if not _usb_hid_source.is_file():
-    raise RuntimeError("No existe modules/usb_hid.py en el repositorio")
-if not _usb_hid_target_dir.is_dir():
-    raise RuntimeError(
-        "No existe el directorio de módulos congelados de ESP32: "
-        + str(_usb_hid_target_dir)
-    )
-copy2(_usb_hid_source, _usb_hid_target_dir / "usb_hid.py")
-print("[OK] USB HID convenience module copied into frozen ESP32 modules.")
