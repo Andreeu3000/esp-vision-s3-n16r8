@@ -76,12 +76,12 @@ jobs:
                 reconfigure
               
               # Aplicar el parche del controlador TinyUSB DCD.
-              DCD="$(find /project /work /opt/esp/idf -path '*/espressif__tinyusb/*' -name 'dcd_esp32sx.c' 2>/dev/null | head -n 1)"
-              if [ -z "$DCD" ]; then
-                DCD="$(find /project /work /opt/esp/idf -path '*/tinyusb/*' ! -path '*/pico-sdk/*' -name 'dcd_esp32sx.c' 2>/dev/null | head -n 1)"
-              fi
+              TUSB_DIR="/project/build/micropython/idf5.5/micropython/ports/esp32/managed_components/espressif__tinyusb"
+              DCD="$(find "$TUSB_DIR" /project /work /opt/esp/idf -name 'dcd_esp32sx.c' 2>/dev/null | head -n 1)"
               if [ -z "$DCD" ] || [ ! -f "$DCD" ]; then
-                echo "ERROR: no se encontró dcd_esp32sx.c de espressif__tinyusb"
+                echo "ERROR: no se encontró dcd_esp32sx.c. Buscando *dcd*.c en espressif__tinyusb:"
+                find "$TUSB_DIR" -name '*dcd*.c' 2>/dev/null || true
+                find "$TUSB_DIR" -maxdepth 4 2>/dev/null || true
                 exit 1
               fi
               PATCH_DCD=""
@@ -101,7 +101,7 @@ jobs:
               echo "Usando DCD: $DCD"
               echo "Usando script DCD: $PATCH_DCD"
               python3 "$PATCH_DCD" "$DCD"
-              
+
               # Compilar firmware.
               idf.py \
                 --board ESP32_S3_N16R8 \
