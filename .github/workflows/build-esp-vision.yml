@@ -84,18 +84,11 @@ jobs:
                 find "$TUSB_DIR" -maxdepth 4 2>/dev/null || true
                 exit 1
               fi
-              PATCH_DCD=""
-              for candidate in "/project/build/micropython/idf5.5/micropython/tools/patch_tinyusb_dcd.py" "/project/tools/patch_tinyusb_dcd.py"; do
-                if [ -f "$candidate" ]; then
-                  PATCH_DCD="$candidate"
-                  break
-                fi
-              done
-              if [ -z "$PATCH_DCD" ]; then
-                PATCH_DCD="$(find /project /work -name 'patch_tinyusb_dcd.py' 2>/dev/null | head -n 1)"
-              fi
+              PATCH_DCD="$(find /project /work -name '*dcd*.py' 2>/dev/null | head -n 1)"
               if [ -z "$PATCH_DCD" ] || [ ! -f "$PATCH_DCD" ]; then
-                echo "ERROR: no se encontró patch_tinyusb_dcd.py"
+                echo "ERROR: no se encontró script DCD (*.py). Listando /project y /work/build/ESP32_S3_N16R8:"
+                ls -la /project /project/tools 2>/dev/null || true
+                find /project /work -maxdepth 3 2>/dev/null || true
                 exit 1
               fi
               echo "Usando DCD: $DCD"
