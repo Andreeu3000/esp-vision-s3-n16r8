@@ -79,6 +79,7 @@ def patch_micropython_tree(mp_root: str | Path) -> None:
         .otg_mode = USB_OTG_MODE_DEVICE,
         .target = USB_PHY_TARGET_INT,
     };
+
     // Init ESP USB Phy
     usb_new_phy(&phy_conf, &phy_hdl);
 }
