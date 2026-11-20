@@ -78,7 +78,7 @@ jobs:
               # Aplicar el parche del controlador TinyUSB DCD.
               mapfile -t DCD_FILES < <(
                 find /project/build -type f \
-                  -path '*/espressif__tinyusb/src/portable/espressif/esp32sx/dcd_esp32sx.c' \
+                  -path '*/tinyusb/src/portable/espressif/esp32sx/dcd_esp32sx.c' \
                   -print
               )
 
