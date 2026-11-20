@@ -513,6 +513,11 @@ if not _usb_role_helper_source.is_file() or not _usb_role_c_source.is_file():
     raise RuntimeError("Faltan tools/usb_role_patch.py o modules/py_usb_role.c")
 copy2(_usb_role_helper_source, _usb_role_tools / "usb_role_patch.py")
 copy2(_usb_role_c_source, _usb_role_tools / "py_usb_role.c")
+_usb_hid_module_source = repo_root / "modules/usb_hid.py"
+if not _usb_hid_module_source.is_file():
+    raise RuntimeError("Falta modules/usb_hid.py en el repositorio")
+copy2(_usb_hid_module_source, _usb_role_tools / "usb_hid.py")
+
 
 _idf_role_source = _idf_ext_path.read_text(encoding="utf-8")
 _idf_role_marker = "# PATCH_USB_ROLE_SWITCH_PREPARED_TREE"
@@ -532,7 +537,7 @@ if _idf_role_marker not in _idf_role_source:
             raise FatalError("USB role switch patch failed: " + str(exc)) from exc
 
         # PATCH_USB_HID_CONVENIENCE_MODULE
-        _usb_hid_src = os.path.join(root, "modules", "usb_hid.py")
+        _usb_hid_src = os.path.join(root, "tools", "usb_hid.py")
         _usb_hid_dst_dir = os.path.join(mp_port_dir(), "modules")
         if not os.path.isfile(_usb_hid_src):
             raise FatalError("USB HID helper is missing: " + _usb_hid_src)
