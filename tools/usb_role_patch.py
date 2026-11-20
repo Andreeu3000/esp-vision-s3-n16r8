@@ -84,8 +84,17 @@ def patch_micropython_tree(mp_root: str | Path) -> None:
     usb_new_phy(&phy_conf, &phy_hdl);
 }
 """
-        if usb_text.count(phy_anchor) != 1:
-            raise RuntimeError("USB role patch: final de usb_phy_init no único")
+        phy_count = usb_text.count(phy_anchor)
+        if phy_count != 1:
+            fn_start = usb_text.find("void usb_phy_init(void)")
+            if fn_start < 0:
+                fn_excerpt = "<funcion no encontrada>"
+            else:
+                fn_excerpt = usb_text[fn_start:fn_start + 2000]
+            raise RuntimeError(
+                "USB role patch: final de usb_phy_init no único; "
+                f"coincidencias={phy_count}; bloque={fn_excerpt!r}"
+            )
         phy_release = '''    // Configure USB PHY
     static const usb_phy_config_t phy_conf = {
         .controller = USB_PHY_CTRL_OTG,
