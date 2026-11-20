@@ -138,12 +138,7 @@ def connect():
     """Start the configured USB Device interfaces again."""
     dev = _usb_role_core.get()
     _usb_role_device_prepare()
-    if dev.active():
-        dev.active(False)
-    try:
-        dev.active(True)
-    except OSError:
-        _usb_role_device_prepare()
+    if not dev.active():
         dev.active(True)
     _usb_role_device_started()
     return True

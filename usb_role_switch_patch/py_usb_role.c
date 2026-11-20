@@ -13,6 +13,7 @@
 #if CONFIG_IDF_TARGET_ESP32S3 && MICROPY_HW_ENABLE_USBDEV
 
 extern esp_err_t mp_usb_phy_deinit(void);
+extern void usb_phy_init(void);
 
 #define USB_HOST_ALL_FREE_BIT   (1U << 0)
 #define USB_HOST_STOPPED_BIT    (1U << 1)
@@ -67,9 +68,13 @@ static void usb_host_daemon_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+/* PATCH_USB_DEVICE_PREPARE_PHY */
 static mp_obj_t usb_role_device_prepare(void) {
     if (s_host_installed) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("USB_HOST_ACTIVE: disconnect Host first"));
+    }
+    if (s_device_released) {
+        usb_phy_init();
     }
     return mp_const_none;
 }
