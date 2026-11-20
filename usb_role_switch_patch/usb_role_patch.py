@@ -73,39 +73,13 @@ def patch_micropython_tree(mp_root: str | Path) -> None:
             1,
         )
 
-        phy_anchor = """    // Configure USB PHY
-    static const usb_phy_config_t phy_conf = {
-        .controller = USB_PHY_CTRL_OTG,
-        .otg_mode = USB_OTG_MODE_DEVICE,
-        .target = USB_PHY_TARGET_INT,
-    };
-
-    // Init ESP USB Phy
-    usb_new_phy(&phy_conf, &phy_hdl);
-}
-"""
-        phy_count = usb_text.count(phy_anchor)
-        if phy_count != 1:
-            fn_start = usb_text.find("void usb_phy_init(void)")
-            if fn_start < 0:
-                fn_excerpt = "<funcion no encontrada>"
-            else:
-                fn_excerpt = usb_text[fn_start:fn_start + 2000]
+        usj_anchor = "\n#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4\nvoid usb_usj_mode(void) {"
+        if usb_text.count(usj_anchor) != 1:
             raise RuntimeError(
-                "USB role patch: final de usb_phy_init no único; "
-                f"coincidencias={phy_count}; bloque={fn_excerpt!r}"
+                "USB role patch: límite después de usb_phy_init no único"
             )
-        phy_release = '''    // Configure USB PHY
-    static const usb_phy_config_t phy_conf = {
-        .controller = USB_PHY_CTRL_OTG,
-        .otg_mode = USB_OTG_MODE_DEVICE,
-        .target = USB_PHY_TARGET_INT,
-    };
 
-    // Init ESP USB Phy
-    usb_new_phy(&phy_conf, &phy_hdl);
-}
-
+        phy_release = """
 /* PATCH_USB_ROLE_PHY_RELEASE */
 esp_err_t mp_usb_phy_deinit(void) {
     if (phy_hdl == NULL) {
@@ -117,8 +91,12 @@ esp_err_t mp_usb_phy_deinit(void) {
     }
     return err;
 }
-'''
-        usb_text = usb_text.replace(phy_anchor, phy_release, 1)
+"""
+        usb_text = usb_text.replace(
+            usj_anchor,
+            phy_release + usj_anchor,
+            1,
+        )
         usb_c.write_text(usb_text, encoding="utf-8")
     elif usb_text.count(usb_marker) != 1:
         raise RuntimeError("USB role patch: marcador PHY duplicado")
