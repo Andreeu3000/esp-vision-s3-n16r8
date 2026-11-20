@@ -76,17 +76,31 @@ jobs:
                 reconfigure
               
               # Aplicar el parche del controlador TinyUSB DCD.
-              DCD="$(find /work /opt/esp/idf /project -path '*/tinyusb/*' -name 'dcd_esp32sx.c' 2>/dev/null | head -n 1)"
+              DCD="$(find /project /work /opt/esp/idf -path '*/espressif__tinyusb/*' -name 'dcd_esp32sx.c' 2>/dev/null | head -n 1)"
               if [ -z "$DCD" ]; then
-                DCD="$(find /work /opt/esp/idf /project -name 'dcd_esp32sx.c' 2>/dev/null | head -n 1)"
+                DCD="$(find /project /work /opt/esp/idf -path '*/tinyusb/*' ! -path '*/pico-sdk/*' -name 'dcd_esp32sx.c' 2>/dev/null | head -n 1)"
               fi
               if [ -z "$DCD" ] || [ ! -f "$DCD" ]; then
-                echo "ERROR: no se encontró dcd_esp32sx.c en /work, /opt/esp/idf ni /project"
-                ls -la "$ESP_VISION_WORK_DIR/build/ESP32_S3_N16R8/managed_components" 2>/dev/null || true
+                echo "ERROR: no se encontró dcd_esp32sx.c de espressif__tinyusb"
+                exit 1
+              fi
+              PATCH_DCD=""
+              for candidate in "/project/build/micropython/idf5.5/micropython/tools/patch_tinyusb_dcd.py" "/project/tools/patch_tinyusb_dcd.py"; do
+                if [ -f "$candidate" ]; then
+                  PATCH_DCD="$candidate"
+                  break
+                fi
+              done
+              if [ -z "$PATCH_DCD" ]; then
+                PATCH_DCD="$(find /project /work -name 'patch_tinyusb_dcd.py' 2>/dev/null | head -n 1)"
+              fi
+              if [ -z "$PATCH_DCD" ] || [ ! -f "$PATCH_DCD" ]; then
+                echo "ERROR: no se encontró patch_tinyusb_dcd.py"
                 exit 1
               fi
               echo "Usando DCD: $DCD"
-              python3 /project/tools/patch_tinyusb_dcd.py "$DCD"
+              echo "Usando script DCD: $PATCH_DCD"
+              python3 "$PATCH_DCD" "$DCD"
               
               # Compilar firmware.
               idf.py \
