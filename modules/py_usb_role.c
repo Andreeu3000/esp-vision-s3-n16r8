@@ -127,7 +127,8 @@ static mp_obj_t usb_role_host_connect(void) {
 
     if (xTaskCreate(usb_host_daemon_task, "usb_host_daemon", 4096, NULL, 5, NULL) != pdPASS) {
         s_host_stop_requested = true;
-        err = usb_host_uninstall();
+        usb_role_drain_host_devices();
+    err = usb_host_uninstall();
         s_host_installed = false;
         vEventGroupDelete(s_host_events);
         s_host_events = NULL;
@@ -140,6 +141,21 @@ static mp_obj_t usb_role_host_connect(void) {
     return mp_const_true;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(usb_role_host_connect_obj, usb_role_host_connect);
+
+/* PATCH_USB_HOST_CLEAN_TEARDOWN */
+static void usb_role_drain_host_devices(void) {
+    // Solicita liberar dispositivos enumerados en Host antes de desinstalar
+    (void)usb_host_device_free_all();
+    if (s_host_events != NULL) {
+        (void)xEventGroupWaitBits(
+            s_host_events,
+            USB_HOST_ALL_FREE_BIT,
+            pdTRUE,
+            pdFALSE,
+            pdMS_TO_TICKS(500)
+        );
+    }
+}
 
 static mp_obj_t usb_role_host_disconnect(void) {
     if (!s_host_installed) {
@@ -174,6 +190,7 @@ static mp_obj_t usb_role_host_disconnect(void) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("USB_HOST_TIMEOUT: daemon did not stop"));
     }
 
+    usb_role_drain_host_devices();
     err = usb_host_uninstall();
     if (err != ESP_OK) {
         usb_role_raise_idf_error("USB_HOST_UNINSTALL_FAILED", err);
