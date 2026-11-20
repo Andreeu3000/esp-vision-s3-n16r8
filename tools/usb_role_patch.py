@@ -23,8 +23,10 @@ def patch_micropython_tree(mp_root: str | Path) -> None:
     common_cmake = port / "esp32_common.cmake"
     board_h = port / "boards" / "ESP32_S3_N16R8" / "mpconfigboard.h"
     usb_pkg = mp_root / "lib" / "micropython-lib" / "micropython" / "usb"
-    device_init = usb_pkg / "device" / "__init__.py"
-    device_core = usb_pkg / "device" / "core.py"
+    usb_base = usb_pkg / "usb-device" / "usb"
+    device_pkg = usb_base / "device"
+    device_init = device_pkg / "__init__.py"
+    device_core = device_pkg / "core.py"
 
     for required in (usb_c, common_cmake, board_h, device_core):
         if not required.is_file():
@@ -71,10 +73,28 @@ def patch_micropython_tree(mp_root: str | Path) -> None:
             1,
         )
 
-        phy_anchor = "    usb_new_phy(&phy_conf, &phy_hdl);\n}\n"
+        phy_anchor = """    // Configure USB PHY
+    static const usb_phy_config_t phy_conf = {
+        .controller = USB_PHY_CTRL_OTG,
+        .otg_mode = USB_OTG_MODE_DEVICE,
+        .target = USB_PHY_TARGET_INT,
+    };
+
+    // Init ESP USB Phy
+    usb_new_phy(&phy_conf, &phy_hdl);
+}
+"""
         if usb_text.count(phy_anchor) != 1:
             raise RuntimeError("USB role patch: final de usb_phy_init no único")
-        phy_release = '''    usb_new_phy(&phy_conf, &phy_hdl);
+        phy_release = '''    // Configure USB PHY
+    static const usb_phy_config_t phy_conf = {
+        .controller = USB_PHY_CTRL_OTG,
+        .otg_mode = USB_OTG_MODE_DEVICE,
+        .target = USB_PHY_TARGET_INT,
+    };
+
+    // Init ESP USB Phy
+    usb_new_phy(&phy_conf, &phy_hdl);
 }
 
 /* PATCH_USB_ROLE_PHY_RELEASE */
@@ -128,7 +148,7 @@ def connect():
 '''
     _write_once(device_init, api_code, api_marker)
 
-    host_py = usb_pkg / "host.py"
+    host_py = usb_base / "host.py"
     host_code = '''"""USB Host role control for ESP32-S3."""
 from _usb_role import host_connect as _host_connect
 from _usb_role import host_disconnect as _host_disconnect
@@ -154,7 +174,7 @@ def device_count():
 '''
     _write_once(host_py, host_code, '"""USB Host role control for ESP32-S3."""')
 
-    root_init = usb_pkg / "__init__.py"
+    root_init = usb_base / "__init__.py"
     root_code = '''"""USB Device and Host role APIs."""
 from . import device, host
 '''
