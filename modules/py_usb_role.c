@@ -19,23 +19,32 @@
 extern esp_err_t mp_usb_phy_deinit(void);
 extern void usb_phy_init(void);
 
-#define USB_HOST_ALL_FREE_BIT    (1U << 0)
-#define USB_HOST_STOPPED_BIT     (1U << 1)
-#define USB_HOST_STOP_TIMEOUT_MS 5000
-#define USB_SERIAL_RX_BUF_SIZE   1024
-#define USB_SERIAL_TX_BUF_SIZE   256
+#define USB_HOST_ALL_FREE_BIT     (1U << 0)
+#define USB_HOST_STOPPED_BIT      (1U << 1)
+#define USB_HOST_STOP_TIMEOUT_MS  5000
+#define USB_SERIAL_RX_BUF_SIZE    1024
+#define USB_SERIAL_TX_BUF_SIZE    256
+#define USB_SERIAL_CTRL_BUF_SIZE  64
+
+/* CDC ACM class requests */
+#define CDC_REQ_SET_LINE_CODING         0x20
+#define CDC_REQ_SET_CONTROL_LINE_STATE  0x22
+#define CDC_CTRL_DTR                    0x01
+#define CDC_CTRL_RTS                    0x02
 
 static EventGroupHandle_t s_host_events;
 static volatile bool s_host_stop_requested;
 static bool s_host_installed;
 static bool s_device_released;
 
-/* Minimal USB Host serial client state for CDC/bulk CNC controllers */
+/* USB Host serial client state for CDC/bulk CNC controllers */
 static usb_host_client_handle_t s_ser_client = NULL;
 static usb_device_handle_t s_ser_dev = NULL;
 static TaskHandle_t s_ser_client_task = NULL;
 static volatile bool s_ser_stop_task = false;
 static uint8_t s_ser_if_num = 0;
+static uint8_t s_ser_comm_if_num = 0;
+static bool s_ser_has_comm_if = false;
 static bool s_ser_if_claimed = false;
 static uint8_t s_ser_ep_in = 0;
 static uint8_t s_ser_ep_out = 0;
@@ -43,8 +52,9 @@ static uint16_t s_ser_mps_in = 64;
 static uint16_t s_ser_mps_out = 64;
 static usb_transfer_t *s_ser_tx_xfer = NULL;
 static usb_transfer_t *s_ser_rx_xfer = NULL;
-static SemaphoreHandle_t s_ser_tx_done = NULL;
-static volatile esp_err_t s_ser_tx_status = ESP_OK;
+static usb_transfer_t *s_ser_ctrl_xfer = NULL;
+static SemaphoreHandle_t s_ser_xfer_done = NULL;
+static volatile usb_transfer_status_t s_ser_last_status = USB_TRANSFER_STATUS_COMPLETED;
 
 static uint8_t s_ser_rx_ring[USB_SERIAL_RX_BUF_SIZE];
 static volatile size_t s_ser_rx_head = 0;
@@ -88,10 +98,10 @@ static size_t ser_rx_pop(uint8_t *out, size_t max_len) {
     return count;
 }
 
-static void ser_tx_cb(usb_transfer_t *transfer) {
-    s_ser_tx_status = transfer->status;
-    if (s_ser_tx_done) {
-        xSemaphoreGive(s_ser_tx_done);
+static void ser_sync_xfer_cb(usb_transfer_t *transfer) {
+    s_ser_last_status = transfer->status;
+    if (s_ser_xfer_done) {
+        xSemaphoreGive(s_ser_xfer_done);
     }
 }
 
@@ -133,6 +143,9 @@ static void usb_role_serial_close_internal(void) {
     if (s_ser_rx_xfer) {
         (void)usb_host_transfer_cancel(s_ser_rx_xfer);
     }
+    if (s_ser_ctrl_xfer) {
+        (void)usb_host_transfer_cancel(s_ser_ctrl_xfer);
+    }
 
     if (s_ser_client_task) {
         vTaskDelay(pdMS_TO_TICKS(80));
@@ -147,11 +160,16 @@ static void usb_role_serial_close_internal(void) {
         (void)usb_host_transfer_free(s_ser_rx_xfer);
         s_ser_rx_xfer = NULL;
     }
+    if (s_ser_ctrl_xfer) {
+        (void)usb_host_transfer_free(s_ser_ctrl_xfer);
+        s_ser_ctrl_xfer = NULL;
+    }
 
     if (s_ser_if_claimed && s_ser_dev) {
         (void)usb_host_interface_release(s_ser_client, s_ser_dev, s_ser_if_num);
     }
     s_ser_if_claimed = false;
+    s_ser_has_comm_if = false;
 
     if (s_ser_dev) {
         (void)usb_host_device_close(s_ser_client, s_ser_dev);
@@ -163,9 +181,9 @@ static void usb_role_serial_close_internal(void) {
         s_ser_client = NULL;
     }
 
-    if (s_ser_tx_done) {
-        vSemaphoreDelete(s_ser_tx_done);
-        s_ser_tx_done = NULL;
+    if (s_ser_xfer_done) {
+        vSemaphoreDelete(s_ser_xfer_done);
+        s_ser_xfer_done = NULL;
     }
     if (s_ser_rx_mutex) {
         vSemaphoreDelete(s_ser_rx_mutex);
@@ -190,6 +208,7 @@ static esp_err_t ser_find_bulk_endpoints(usb_device_handle_t dev) {
     uint8_t cur_if = 0;
     bool found_in = false;
     bool found_out = false;
+    s_ser_has_comm_if = false;
 
     while (offset < cfg->wTotalLength) {
         desc = usb_parse_next_descriptor_of_type(desc, cfg->wTotalLength, USB_W_VALUE_DT_ANY, &offset);
@@ -199,6 +218,10 @@ static esp_err_t ser_find_bulk_endpoints(usb_device_handle_t dev) {
         if (desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
             const usb_intf_desc_t *intf = (const usb_intf_desc_t *)desc;
             cur_if = intf->bInterfaceNumber;
+            if (intf->bInterfaceClass == USB_CLASS_COMM) {
+                s_ser_comm_if_num = cur_if;
+                s_ser_has_comm_if = true;
+            }
             if (!found_in || !found_out) {
                 s_ser_if_num = cur_if;
                 found_in = false;
@@ -227,6 +250,61 @@ static esp_err_t ser_find_bulk_endpoints(usb_device_handle_t dev) {
         }
     }
     return ESP_ERR_NOT_FOUND;
+}
+
+static void ser_configure_cdc_acm(uint32_t baudrate) {
+    if (!s_ser_ctrl_xfer || !s_ser_xfer_done || !s_ser_dev) {
+        return;
+    }
+    uint8_t if_idx = s_ser_has_comm_if ? s_ser_comm_if_num : s_ser_if_num;
+
+    /* SET_LINE_CODING: 7 bytes (dwDTERate little-endian, bCharFormat=0 [1 stop], bParityType=0 [none], bDataBits=8) */
+    uint8_t line_coding[7] = {
+        (uint8_t)(baudrate & 0xFF),
+        (uint8_t)((baudrate >> 8) & 0xFF),
+        (uint8_t)((baudrate >> 16) & 0xFF),
+        (uint8_t)((baudrate >> 24) & 0xFF),
+        0x00,
+        0x00,
+        0x08,
+    };
+    memcpy(s_ser_ctrl_xfer->data_buffer, line_coding, sizeof(line_coding));
+    USB_SETUP_PACKET_INIT_SET_INTERFACE(
+        (usb_setup_packet_t *)s_ser_ctrl_xfer->data_buffer,
+        CDC_REQ_SET_LINE_CODING,
+        0,
+        if_idx,
+        sizeof(line_coding)
+    );
+    memcpy(s_ser_ctrl_xfer->data_buffer + sizeof(usb_setup_packet_t), line_coding, sizeof(line_coding));
+
+    xSemaphoreTake(s_ser_xfer_done, 0);
+    s_ser_ctrl_xfer->device_handle = s_ser_dev;
+    s_ser_ctrl_xfer->bEndpointAddress = 0;
+    s_ser_ctrl_xfer->num_bytes = sizeof(usb_setup_packet_t) + sizeof(line_coding);
+    s_ser_ctrl_xfer->callback = ser_sync_xfer_cb;
+    s_ser_last_status = USB_TRANSFER_STATUS_COMPLETED;
+    if (usb_host_transfer_submit_control(s_ser_client, s_ser_ctrl_xfer) == ESP_OK) {
+        (void)xSemaphoreTake(s_ser_xfer_done, pdMS_TO_TICKS(200));
+    }
+
+    /* SET_CONTROL_LINE_STATE: assert DTR | RTS */
+    xSemaphoreTake(s_ser_xfer_done, 0);
+    USB_SETUP_PACKET_INIT_SET_INTERFACE(
+        (usb_setup_packet_t *)s_ser_ctrl_xfer->data_buffer,
+        CDC_REQ_SET_CONTROL_LINE_STATE,
+        CDC_CTRL_DTR | CDC_CTRL_RTS,
+        if_idx,
+        0
+    );
+    s_ser_ctrl_xfer->device_handle = s_ser_dev;
+    s_ser_ctrl_xfer->bEndpointAddress = 0;
+    s_ser_ctrl_xfer->num_bytes = sizeof(usb_setup_packet_t);
+    s_ser_ctrl_xfer->callback = ser_sync_xfer_cb;
+    s_ser_last_status = USB_TRANSFER_STATUS_COMPLETED;
+    if (usb_host_transfer_submit_control(s_ser_client, s_ser_ctrl_xfer) == ESP_OK) {
+        (void)xSemaphoreTake(s_ser_xfer_done, pdMS_TO_TICKS(200));
+    }
 }
 
 /* PATCH_USB_HOST_CLEAN_TEARDOWN */
@@ -423,9 +501,16 @@ static mp_obj_t usb_role_host_info(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(usb_role_host_info_obj, usb_role_host_info);
 
 static mp_obj_t usb_role_serial_open(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-    (void)n_args;
-    (void)pos_args;
-    (void)kw_args;
+    uint32_t baudrate = 115200;
+    enum { ARG_baudrate, ARG_timeout };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_baudrate, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 115200} },
+        { MP_QSTR_timeout,  MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 1000} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+    baudrate = (uint32_t)args[ARG_baudrate].u_int;
+
     if (!s_host_installed) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("USB_HOST_NOT_ACTIVE: call usb.host.connect() first"));
     }
@@ -434,8 +519,8 @@ static mp_obj_t usb_role_serial_open(size_t n_args, const mp_obj_t *pos_args, mp
     }
 
     s_ser_rx_mutex = xSemaphoreCreateMutex();
-    s_ser_tx_done = xSemaphoreCreateBinary();
-    if (!s_ser_rx_mutex || !s_ser_tx_done) {
+    s_ser_xfer_done = xSemaphoreCreateBinary();
+    if (!s_ser_rx_mutex || !s_ser_xfer_done) {
         usb_role_serial_close_internal();
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("USB_SERIAL_NO_MEMORY"));
     }
@@ -459,9 +544,14 @@ static mp_obj_t usb_role_serial_open(size_t n_args, const mp_obj_t *pos_args, mp
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("USB_SERIAL_TASK_FAILED"));
     }
 
-    /* Open first enumerated USB device (address 1) */
-    err = usb_host_device_open(s_ser_client, 1, &s_ser_dev);
-    if (err != ESP_OK) {
+    err = ESP_ERR_NOT_FOUND;
+    for (uint8_t addr = 1; addr <= 4; addr++) {
+        err = usb_host_device_open(s_ser_client, addr, &s_ser_dev);
+        if (err == ESP_OK) {
+            break;
+        }
+    }
+    if (err != ESP_OK || !s_ser_dev) {
         usb_role_serial_close_internal();
         usb_role_raise_idf_error("USB_SERIAL_DEV_OPEN_FAILED", err);
     }
@@ -481,14 +571,20 @@ static mp_obj_t usb_role_serial_open(size_t n_args, const mp_obj_t *pos_args, mp
 
     err = usb_host_transfer_alloc(USB_SERIAL_TX_BUF_SIZE, 0, &s_ser_tx_xfer);
     if (err == ESP_OK) {
-        err = usb_host_transfer_alloc(s_ser_mps_in > USB_SERIAL_RX_BUF_SIZE ? USB_SERIAL_RX_BUF_SIZE : s_ser_mps_in, 0, &s_ser_rx_xfer);
+        err = usb_host_transfer_alloc(
+            s_ser_mps_in > USB_SERIAL_RX_BUF_SIZE ? USB_SERIAL_RX_BUF_SIZE : s_ser_mps_in,
+            0, &s_ser_rx_xfer);
     }
-    if (err != ESP_OK || !s_ser_tx_xfer || !s_ser_rx_xfer) {
+    if (err == ESP_OK) {
+        err = usb_host_transfer_alloc(USB_SERIAL_CTRL_BUF_SIZE, 0, &s_ser_ctrl_xfer);
+    }
+    if (err != ESP_OK || !s_ser_tx_xfer || !s_ser_rx_xfer || !s_ser_ctrl_xfer) {
         usb_role_serial_close_internal();
         usb_role_raise_idf_error("USB_SERIAL_XFER_ALLOC_FAILED", err != ESP_OK ? err : ESP_ERR_NO_MEM);
     }
 
     s_ser_open = true;
+    ser_configure_cdc_acm(baudrate);
 
     s_ser_rx_xfer->device_handle = s_ser_dev;
     s_ser_rx_xfer->bEndpointAddress = s_ser_ep_in;
@@ -505,7 +601,7 @@ static mp_obj_t usb_role_serial_open(size_t n_args, const mp_obj_t *pos_args, mp
 static MP_DEFINE_CONST_FUN_OBJ_KW(usb_role_serial_open_obj, 0, usb_role_serial_open);
 
 static mp_obj_t usb_role_serial_write(mp_obj_t data_obj, mp_obj_t timeout_obj) {
-    if (!s_ser_open || !s_ser_tx_xfer || !s_ser_tx_done) {
+    if (!s_ser_open || !s_ser_tx_xfer || !s_ser_xfer_done) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("USB_SERIAL_CLOSED"));
     }
     mp_buffer_info_t bufinfo;
@@ -522,24 +618,24 @@ static mp_obj_t usb_role_serial_write(mp_obj_t data_obj, mp_obj_t timeout_obj) {
         if (chunk > USB_SERIAL_TX_BUF_SIZE) {
             chunk = USB_SERIAL_TX_BUF_SIZE;
         }
-        xSemaphoreTake(s_ser_tx_done, 0);
+        xSemaphoreTake(s_ser_xfer_done, 0);
         memcpy(s_ser_tx_xfer->data_buffer, src + sent_total, chunk);
         s_ser_tx_xfer->device_handle = s_ser_dev;
         s_ser_tx_xfer->bEndpointAddress = s_ser_ep_out;
         s_ser_tx_xfer->num_bytes = chunk;
-        s_ser_tx_xfer->callback = ser_tx_cb;
-        s_ser_tx_status = ESP_OK;
+        s_ser_tx_xfer->callback = ser_sync_xfer_cb;
+        s_ser_last_status = USB_TRANSFER_STATUS_COMPLETED;
 
         esp_err_t err = usb_host_transfer_submit(s_ser_tx_xfer);
         if (err != ESP_OK) {
             usb_role_raise_idf_error("USB_SERIAL_TX_SUBMIT_FAILED", err);
         }
-        if (xSemaphoreTake(s_ser_tx_done, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        if (xSemaphoreTake(s_ser_xfer_done, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
             (void)usb_host_transfer_cancel(s_ser_tx_xfer);
             mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("USB_SERIAL_TX_TIMEOUT"));
         }
-        if (s_ser_tx_status != USB_TRANSFER_STATUS_COMPLETED) {
-            mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("USB_SERIAL_TX_ERR_%d"), (int)s_ser_tx_status);
+        if (s_ser_last_status != USB_TRANSFER_STATUS_COMPLETED) {
+            mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("USB_SERIAL_TX_ERR_%d"), (int)s_ser_last_status);
         }
         sent_total += s_ser_tx_xfer->actual_num_bytes;
     }

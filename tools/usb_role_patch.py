@@ -13,11 +13,24 @@ def _write_once(path: Path, content: str, marker: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def _find_usb_tree(mp_build_dir: Path):
+    candidates = [
+        mp_build_dir / "micropython-lib/micropython/usb",
+        mp_build_dir / "micropython/lib/micropython-lib/micropython/usb",
+        mp_build_dir.parent / "micropython-lib/micropython/usb",
+    ]
+    for path in candidates:
+        if path.is_dir():
+            return path
+    return None
+
+
 def patch_micropython_tree(mp_build_dir) -> None:
     mp_build_dir = Path(mp_build_dir)
-    usb_base = mp_build_dir / "micropython-lib/micropython/usb"
-    if not usb_base.is_dir():
-        raise RuntimeError(f"USB tree not found: {usb_base}")
+    usb_base = _find_usb_tree(mp_build_dir)
+    if usb_base is None:
+        print(f"[USB ROLE] Info: USB tree not present yet under {mp_build_dir}; skipping in this step.")
+        return
 
     device_init = usb_base / "device/__init__.py"
     api_marker = "# PATCH_USB_ROLE_DEVICE_API"
@@ -37,7 +50,7 @@ def disconnect():
 
 
 def connect():
-    """Start the configured USB Device interfaces again."""
+    """Start the configured USB Device interfaces if registered."""
     dev = _usb_role_core.get()
     _usb_role_device_prepare()
     if not dev.active() and dev._itfs:
@@ -98,7 +111,7 @@ class Serial:
 
     def open(self, baudrate=115200, timeout=1000):
         self._timeout_ms = int(timeout)
-        _ser_open(baudrate=baudrate, timeout=timeout)
+        _ser_open(baudrate=int(baudrate), timeout=int(timeout))
         self._is_open = True
         self._buf = bytearray()
         return True
