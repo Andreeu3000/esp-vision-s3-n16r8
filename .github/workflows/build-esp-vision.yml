@@ -76,15 +76,22 @@ jobs:
                 reconfigure
               
               # Aplicar el parche del controlador TinyUSB DCD.
-              DCD="$ESP_VISION_WORK_DIR/build/ESP32_S3_N16R8/managed_components/espressif__tinyusb/src/portable/espressif/esp32sx/dcd_esp32sx.c"
-              
-              if [ ! -f "$DCD" ]; then
-                echo "ERROR: no se encontró el controlador DCD: $DCD"
+              mapfile -t DCD_FILES < <(
+                find /project/build -type f \
+                  -path '*/espressif__tinyusb/src/portable/espressif/esp32sx/dcd_esp32sx.c' \
+                  -print
+              )
+
+              if [ "${#DCD_FILES[@]}" -ne 1 ]; then
+                echo "ERROR: se esperaba exactamente un DCD; encontrados: ${#DCD_FILES[@]}"
+                find /project/build -type f -name 'dcd_esp32sx.c' -print
                 exit 1
               fi
-              
+
+              DCD="${DCD_FILES[0]}"
+              echo "DCD localizado: $DCD"
+
               python3 /project/tools/patch_tinyusb_dcd.py "$DCD"
-              
               # Compilar firmware.
               idf.py \
                 --board ESP32_S3_N16R8 \
