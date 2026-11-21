@@ -275,14 +275,39 @@ def disconnect():
 
 
 def wait_ready(timeout_ms=10000):
+    """Wait until all HID interfaces are open and their IN endpoints are idle."""
     if keyboard is None:
         raise OSError("USB_HID_NOT_CONFIGURED: call usb_hid.init() first")
     deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
-    while not (keyboard.is_open() and mouse.is_open() and consumer.is_open()):
+
+    while True:
+        opened = (
+            keyboard.is_open()
+            and mouse.is_open()
+            and consumer.is_open()
+        )
+        idle = (
+            not keyboard.busy()
+            and not mouse.busy()
+            and not consumer.busy()
+        )
+
+        if opened and idle:
+            # Let the freshly enumerated endpoints settle before first report.
+            time.sleep_ms(20)
+            if (
+                keyboard.is_open()
+                and mouse.is_open()
+                and consumer.is_open()
+                and not keyboard.busy()
+                and not mouse.busy()
+                and not consumer.busy()
+            ):
+                return True
+
         if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
             return False
-        time.sleep_ms(20)
-    return True
+        time.sleep_ms(10)
 
 
 def send_text(text, delay_entre_letras=10):
