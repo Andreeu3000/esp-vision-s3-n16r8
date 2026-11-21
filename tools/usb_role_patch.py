@@ -136,8 +136,14 @@ from _usb_role import device_release as _usb_role_device_release
 def disconnect():
     """Stop USB Device and release TinyUSB plus the USB PHY."""
     dev = _usb_role_core.get()
+    # Stop TinyUSB first so any in-flight endpoint transfers are cancelled.
     if dev.active():
         dev.active(False)
+
+    # active(False) does not guarantee that micropython-lib's Python-side
+    # endpoint callback table is reset. Run the same reset path used by the
+    # TinyUSB reset callback: mark interfaces closed and clear stale transfers.
+    dev._reset_cb()
     return _usb_role_device_release()
 
 def connect():
