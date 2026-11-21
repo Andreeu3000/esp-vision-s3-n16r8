@@ -31,7 +31,7 @@ _CONSUMER_REPORT_DESC = (
 )
 
 
-class Consumer:
+class Consumer(HIDInterface):
     VOLUME_UP = 0x00E9
     VOLUME_DOWN = 0x00EA
     MUTE = 0x00E2
@@ -47,7 +47,7 @@ class Consumer:
     AC_BOOKMARKS = 0x022A
 
     def __init__(self):
-        self._interface = HIDInterface(
+        super().__init__(
             _CONSUMER_REPORT_DESC,
             interface_str="MicroPython Consumer Control",
         )
@@ -57,17 +57,17 @@ class Consumer:
         if not 0 <= usage <= 0x03FF:
             raise ValueError("usage")
         # The HID patch adds bounded waits and disconnect-aware submission.
-        self._interface._wait_ready(timeout_ms)
+        self._wait_ready(timeout_ms)
         self._report[0] = usage & 0xFF
         self._report[1] = usage >> 8
-        self._interface._submit_report(self._report)
+        self._submit_report(self._report)
         return True
 
     def release(self, timeout_ms=100):
-        self._interface._wait_ready(timeout_ms)
+        self._wait_ready(timeout_ms)
         self._report[0] = 0
         self._report[1] = 0
-        self._interface._submit_report(self._report)
+        self._submit_report(self._report)
         return True
 
     def tap(self, usage, hold_ms=30, timeout_ms=100):
@@ -278,7 +278,7 @@ def wait_ready(timeout_ms=10000):
     if keyboard is None:
         raise OSError("USB_HID_NOT_CONFIGURED: call usb_hid.init() first")
     deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
-    while not (keyboard.is_open() and mouse.is_open() and consumer._interface.is_open()):
+    while not (keyboard.is_open() and mouse.is_open() and consumer.is_open()):
         if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
             return False
         time.sleep_ms(20)
