@@ -53,6 +53,18 @@ class Consumer(HIDInterface):
         )
         self._report = bytearray(2)
 
+    def _clear_report(self):
+        self._report[0] = 0
+        self._report[1] = 0
+
+    def on_reset(self):
+        super().on_reset()
+        self._clear_report()
+
+    def on_open(self):
+        super().on_open()
+        self._clear_report()
+
     def send_usage(self, usage, timeout_ms=100):
         if not 0 <= usage <= 0x03FF:
             raise ValueError("usage")
@@ -135,6 +147,57 @@ class Keyboard(KeyboardInterface):
     def __init__(self):
         super().__init__()
         self.consumer = None
+        self._needs_sync = True
+        self._held_keys = []
+
+    def _reset_reports(self):
+        for report in self._key_reports:
+            for i in range(len(report)):
+                report[i] = 0
+        self._key_reports[0], self._key_reports[1] = self._key_reports
+        self._held_keys = []
+        self._needs_sync = True
+
+    def on_reset(self):
+        super().on_reset()
+        self._reset_reports()
+
+    def on_open(self):
+        super().on_open()
+        self._reset_reports()
+
+    def send_keys(self, down_keys, timeout_ms=100):
+        # After every enumeration, send and complete a neutral report before
+        # accepting the first real key. This also synchronizes both ping-pong buffers.
+        if self._needs_sync and self.is_open():
+            self._needs_sync = False
+            try:
+                super().send_keys((), timeout_ms)
+                deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
+                while self.busy():
+                    if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                        self._needs_sync = True
+                        raise OSError("USB_HID_TIMEOUT: keyboard sync report")
+                    time.sleep_ms(1)
+            except Exception:
+                self._needs_sync = True
+                raise
+        return super().send_keys(down_keys, timeout_ms)
+
+    def press(self, key, *modifiers, timeout_ms=100):
+        for item in tuple(modifiers) + (key,):
+            if item not in self._held_keys:
+                self._held_keys.append(item)
+        return self.send_keys(tuple(self._held_keys), timeout_ms)
+
+    def release(self, key=None, *modifiers, timeout_ms=100):
+        if key is None:
+            self._held_keys = []
+        else:
+            for item in tuple(modifiers) + (key,):
+                if item in self._held_keys:
+                    self._held_keys.remove(item)
+        return self.send_keys(tuple(self._held_keys), timeout_ms)
 
     def tap(self, key, *modifiers, hold_ms=30):
         self.send_keys(tuple(modifiers) + (key,))
@@ -218,10 +281,45 @@ class Keyboard(KeyboardInterface):
 
 
 class Mouse(MouseInterface):
+    def __init__(self):
+        super().__init__()
+        self._needs_sync = True
+        self._cursor_x = 0
+        self._cursor_y = 0
+
+    def _reset_mouse_state(self):
+        self._l = False
+        self._r = False
+        self._m = False
+        self._buf[0] = 0
+        self._buf[1] = 0
+        self._buf[2] = 0
+        self._cursor_x = 0
+        self._cursor_y = 0
+        self._needs_sync = True
+
+    def on_reset(self):
+        super().on_reset()
+        self._reset_mouse_state()
+
+    def on_open(self):
+        super().on_open()
+        self._reset_mouse_state()
+
+    def _sync_after_reconnect(self):
+        if self._needs_sync and self.is_open():
+            self._needs_sync = False
+            try:
+                self.send_report(0, 0)
+            except Exception:
+                self._needs_sync = True
+                raise
+
     def move(self, dx, dy):
         return self.move_by(dx, dy)
 
     def press(self, button="left"):
+        self._sync_after_reconnect()
         method = {"left": self.click_left, "right": self.click_right,
                   "middle": self.click_middle}.get(button)
         if method is None:
@@ -229,6 +327,7 @@ class Mouse(MouseInterface):
         return method(True)
 
     def release(self, button="left"):
+        self._sync_after_reconnect()
         method = {"left": self.click_left, "right": self.click_right,
                   "middle": self.click_middle}.get(button)
         if method is None:
@@ -239,6 +338,29 @@ class Mouse(MouseInterface):
         self.press(button)
         time.sleep_ms(hold_ms)
         return self.release(button)
+
+    def moveTo(self, x, y, screen_width=1920, screen_height=1080):
+        """Move to a virtual absolute coordinate using relative HID reports.
+
+        The virtual origin is (0, 0) after each USB enumeration. HID mice are
+        relative devices, so the physical host cursor position cannot be queried.
+        """
+        if screen_width <= 0 or screen_height <= 0:
+            raise ValueError("screen dimensions must be positive")
+        if not 0 <= x < screen_width or not 0 <= y < screen_height:
+            raise ValueError("target outside virtual screen")
+        self._sync_after_reconnect()
+        dx = x - self._cursor_x
+        dy = y - self._cursor_y
+        while dx or dy:
+            sx = max(-127, min(127, dx))
+            sy = max(-127, min(127, dy))
+            self.move_by(sx, sy)
+            self._cursor_x += sx
+            self._cursor_y += sy
+            dx -= sx
+            dy -= sy
+        return True
 
 
 keyboard = None
