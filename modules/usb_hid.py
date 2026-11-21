@@ -52,6 +52,7 @@ class Consumer(HIDInterface):
             interface_str="MicroPython Consumer Control",
         )
         self._report = bytearray(2)
+        self._needs_sync = True
 
     def _clear_report(self):
         self._report[0] = 0
@@ -60,15 +61,35 @@ class Consumer(HIDInterface):
     def on_reset(self):
         super().on_reset()
         self._clear_report()
+        self._needs_sync = True
 
     def on_open(self):
         super().on_open()
         self._clear_report()
+        self._needs_sync = True
+
+    def _sync_after_reconnect(self, timeout_ms=100):
+        if not self._needs_sync or not self.is_open():
+            return
+        self._needs_sync = False
+        try:
+            self._wait_ready(timeout_ms)
+            self._clear_report()
+            self._submit_report(self._report)
+            deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
+            while self.busy():
+                if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                    raise OSError("USB_HID_TIMEOUT: consumer sync report")
+                time.sleep_ms(1)
+        except Exception:
+            self._needs_sync = True
+            raise
 
     def send_usage(self, usage, timeout_ms=100):
         if not 0 <= usage <= 0x03FF:
             raise ValueError("usage")
-        # The HID patch adds bounded waits and disconnect-aware submission.
+        # Synchronize the interface once after enumeration before media keys.
+        self._sync_after_reconnect(timeout_ms)
         self._wait_ready(timeout_ms)
         self._report[0] = usage & 0xFF
         self._report[1] = usage >> 8
@@ -76,6 +97,7 @@ class Consumer(HIDInterface):
         return True
 
     def release(self, timeout_ms=100):
+        self._sync_after_reconnect(timeout_ms)
         self._wait_ready(timeout_ms)
         self._report[0] = 0
         self._report[1] = 0
