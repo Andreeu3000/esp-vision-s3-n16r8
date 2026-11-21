@@ -318,6 +318,22 @@ class Mouse(MouseInterface):
     def move(self, dx, dy):
         return self.move_by(dx, dy)
 
+    def move_by(self, dx, dy):
+        self._sync_after_reconnect()
+        return super().move_by(dx, dy)
+
+    def click_left(self, down=True):
+        self._sync_after_reconnect()
+        return super().click_left(down)
+
+    def click_right(self, down=True):
+        self._sync_after_reconnect()
+        return super().click_right(down)
+
+    def click_middle(self, down=True):
+        self._sync_after_reconnect()
+        return super().click_middle(down)
+
     def press(self, button="left"):
         self._sync_after_reconnect()
         method = {"left": self.click_left, "right": self.click_right,
