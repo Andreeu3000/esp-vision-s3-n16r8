@@ -488,6 +488,24 @@ def move(dx, dy):
     return mouse.move(dx, dy)
 
 
+def moveTo(x, y, screen_width=1920, screen_height=1080):
+    if mouse is None:
+        raise OSError("USB_HID_NOT_CONFIGURED: call usb_hid.init() first")
+    return mouse.moveTo(x, y, screen_width, screen_height)
+
+
+def press_key(key, *modifiers, timeout_ms=100):
+    if keyboard is None:
+        raise OSError("USB_HID_NOT_CONFIGURED: call usb_hid.init() first")
+    return keyboard.press(key, *modifiers, timeout_ms=timeout_ms)
+
+
+def release_key(key=None, *modifiers, timeout_ms=100):
+    if keyboard is None:
+        raise OSError("USB_HID_NOT_CONFIGURED: call usb_hid.init() first")
+    return keyboard.release(key, *modifiers, timeout_ms=timeout_ms)
+
+
 def click(button="left", hold_ms=30):
     if mouse is None:
         raise OSError("USB_HID_NOT_CONFIGURED: call usb_hid.init() first")
