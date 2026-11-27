@@ -13,27 +13,10 @@ for p in (cmake_file,role_helper,src,manifest):
 shutil.copy2(src,upstream/"modules"/"py_usb_serial.c")
 shutil.copy2(src,upstream/"tools"/"py_usb_serial.c")
 
-cm=cmake_file.read_text()
-marker="# ESP-VISION USB Host serial (S3 only)."
-anchor="target_link_libraries(usermod INTERFACE usermod_esp_vision_platform)"
-block="""
-# ESP-VISION USB Host serial (S3 only).
-if(IDF_TARGET STREQUAL "esp32s3")
-    target_sources(usermod_esp_vision_platform INTERFACE
-        ${ESP_VISION_ROOT}/modules/py_usb_serial.c
-    )
-    list(APPEND IDF_COMPONENTS
-        espressif__usb_host_cdc_acm
-        espressif__usb_host_ch34x_vcp
-        espressif__usb_host_cp210x_vcp
-        espressif__usb_host_ftdi_vcp
-    )
-endif()
-"""
-if marker not in cm:
-    if cm.count(anchor)!=1: raise RuntimeError("usermod CMake anchor not unique")
-    cm=cm.replace(anchor,block+"\n"+anchor,1); cmake_file.write_text(cm)
-elif cm.count(marker)!=1: raise RuntimeError("duplicate USB serial CMake marker")
+# The native module is compiled by MicroPython's ESP32 component source list.
+# Do not also add it to micropython.cmake: that would compile/register it twice.
+shutil.copy2(src,upstream/"modules"/"py_usb_serial.c")
+shutil.copy2(src,upstream/"tools"/"py_usb_serial.c")
 
 h=role_helper.read_text()
 copy_anchor="    shutil.copy2(source_c, dest_c)"
