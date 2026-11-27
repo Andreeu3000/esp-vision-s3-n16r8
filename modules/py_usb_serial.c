@@ -2,7 +2,6 @@
 #include <stdbool.h>
 #include "py/obj.h"
 #include "py/runtime.h"
-#include "py/buffer.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
