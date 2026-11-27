@@ -79,7 +79,10 @@ static mp_obj_t open_serial(size_t n,const mp_obj_t *a) {
             if(le!=ESP_OK&&le!=ESP_ERR_NOT_SUPPORTED&&le!=ESP_ERR_INVALID_RESPONSE){(void)cdc_acm_host_close(s_cdc);s_cdc=NULL;raise_idf("USB_CDC_LINE_CODING_FAILED",le);}
             s_connected=true; return mp_const_true;
         }
-        if(!timeout)break; vTaskDelay(pdMS_TO_TICKS(10));
+        if (!timeout) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
     } while((xTaskGetTickCount()-start)<total);
     mp_raise_msg_varg(&mp_type_OSError,MP_ERROR_TEXT("USB_SERIAL_NOT_FOUND after %d ms: %s"),(int)timeout,esp_err_to_name(err));
     return mp_const_false;
@@ -118,7 +121,11 @@ static MP_DEFINE_CONST_FUN_OBJ_0(close_obj,close_serial);
 static mp_obj_t shutdown_serial(void){
     (void)close_serial();if(s_driver){esp_err_t e=cdc_acm_host_uninstall();TickType_t st=xTaskGetTickCount();
         while(e==ESP_ERR_NOT_FINISHED&&(xTaskGetTickCount()-st)<pdMS_TO_TICKS(3000)){vTaskDelay(pdMS_TO_TICKS(10));e=cdc_acm_host_uninstall();}
-        if(e!=ESP_OK)raise_idf("USB_CDC_UNINSTALL_FAILED",e);s_driver=false;}
+        if (e != ESP_OK) {
+            raise_idf("USB_CDC_UNINSTALL_FAILED", e);
+        }
+        s_driver = false;
+    }
     return mp_const_true;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(shutdown_obj,shutdown_serial);
