@@ -3,7 +3,7 @@ name: Build ESP-VISION S3 N16R8
 on:
   workflow_dispatch:
   push:
-    branches: ["main", "master", "feature/quirc-secondary-reader-20261113-201828", "feature/imlib-file-vision-20261114", "feature/usb-role-switch-20261118", "feature/usb-host-serial-grbl-20261127", "fix/usb-host-dwc-reset-20261127"]
+    branches: ["main", "master", "feature/quirc-secondary-reader-20261113-201828", "feature/imlib-file-vision-20261114", "feature/usb-role-switch-20261118", "feature/usb-host-serial-grbl-20261127", "fix/usb-host-dwc-reset-20261127", "fix/usb-host-enum-filter-20261127"]
   pull_request:
 
 permissions:
@@ -73,11 +73,30 @@ jobs:
               export PATH="/work/.ci-bin:$PATH"
 
               # Configurar ESP-IDF y descargar componentes.
+              BUILD_DIR="$ESP_VISION_WORK_DIR/build/ESP32_S3_N16R8"
+
               idf.py \
                 --board ESP32_S3_N16R8 \
-                -B "$ESP_VISION_WORK_DIR/build/ESP32_S3_N16R8" \
+                -B "$BUILD_DIR" \
                 reconfigure
-              
+
+              # Report the effective enum-filter Kconfig value from generated files.
+              echo "===== USB HOST ENUM FILTER CONFIG ====="
+              FOUND_CONFIG=0
+              while IFS= read -r config_file; do
+                if grep -q "USB_HOST_ENABLE_ENUM_FILTER_CALLBACK" "$config_file"; then
+                  echo "--- $config_file"
+                  grep -n "USB_HOST_ENABLE_ENUM_FILTER_CALLBACK" "$config_file" || true
+                  FOUND_CONFIG=1
+                fi
+              done < <(find "$BUILD_DIR" -type f \\
+                \( -name "sdkconfig" -o -name "sdkconfig.h" -o -name "sdkconfig.combined" \\
+                \) -print)
+              if [ "$FOUND_CONFIG" -eq 0 ]; then
+                echo "WARNING: enum-filter Kconfig symbol not found in generated sdkconfig files"
+              fi
+              echo "========================================"
+
               # Aplicar el parche del controlador TinyUSB DCD.
               mapfile -t DCD_FILES < <(
                 find /project/build -type f \
