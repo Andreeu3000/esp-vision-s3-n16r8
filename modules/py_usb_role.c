@@ -3,6 +3,10 @@
 #include "py/runtime.h"
 #include "esp_err.h"
 #include "esp_intr_alloc.h"
+#include "esp_private/periph_ctrl.h"
+#include "soc/periph_defs.h"
+#include "soc/rtc_cntl_reg.h"
+#include "soc/soc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
@@ -23,6 +27,28 @@ static EventGroupHandle_t s_host_events;
 static volatile bool s_host_stop_requested;
 static bool s_host_installed;
 static bool s_device_released;
+static bool s_host_usb_clock_enabled;
+
+/*
+ * ESP32-S3 USB-OTG can retain DWC2/PHY state from the previous USB role.
+ * Arduino-ESP32 performs this reset before starting its TinyUSB Host stack.
+ * Do the equivalent only on the Host entry path, after TinyUSB Device and
+ * its PHY have been released. Keep the peripheral clock enabled afterward:
+ * the Host HCD needs it, and the next Device role reuses the same controller.
+ */
+static void usb_role_host_reset_controller(void) {
+    REG_CLR_BIT(RTC_CNTL_USB_CONF_REG, RTC_CNTL_IO_MUX_RESET_DISABLE);
+    REG_CLR_BIT(RTC_CNTL_USB_CONF_REG, RTC_CNTL_USB_RESET_DISABLE);
+
+    periph_module_reset(PERIPH_USB_MODULE);
+
+    // Enable once only. Repeated Host <-> Device transitions must not leak
+    // peripheral clock reference counts.
+    if (!s_host_usb_clock_enabled) {
+        periph_module_enable(PERIPH_USB_MODULE);
+        s_host_usb_clock_enabled = true;
+    }
+}
 
 static void usb_role_raise_idf_error(const char *operation, esp_err_t err) {
     mp_raise_msg_varg(&mp_type_OSError,
@@ -118,6 +144,10 @@ static mp_obj_t usb_role_host_connect(void) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("USB_HOST_NO_MEMORY: event group"));
     }
     s_host_stop_requested = false;
+
+    // Reset DWC2/USB-OTG only when entering Host mode. Device-mode code and
+    // the rest of the board peripherals are deliberately left untouched.
+    usb_role_host_reset_controller();
 
     const usb_host_config_t host_config = {
         .skip_phy_setup = false,
