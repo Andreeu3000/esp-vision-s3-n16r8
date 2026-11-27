@@ -89,8 +89,8 @@ jobs:
                   grep -n "USB_HOST_ENABLE_ENUM_FILTER_CALLBACK" "$config_file" || true
                   FOUND_CONFIG=1
                 fi
-              done < <(find "$BUILD_DIR" -type f \\
-                \( -name "sdkconfig" -o -name "sdkconfig.h" -o -name "sdkconfig.combined" \\
+              done < <(find "$BUILD_DIR" -type f \
+                \( -name "sdkconfig" -o -name "sdkconfig.h" -o -name "sdkconfig.combined" \
                 \) -print)
               if [ "$FOUND_CONFIG" -eq 0 ]; then
                 echo "WARNING: enum-filter Kconfig symbol not found in generated sdkconfig files"
