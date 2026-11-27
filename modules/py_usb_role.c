@@ -2,6 +2,7 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "esp_err.h"
+#include "esp_log.h"
 #include "esp_intr_alloc.h"
 #include "esp_private/periph_ctrl.h"
 #include "soc/periph_defs.h"
@@ -28,6 +29,29 @@ static volatile bool s_host_stop_requested;
 static bool s_host_installed;
 static bool s_device_released;
 static bool s_host_usb_clock_enabled;
+
+static const char *USB_HOST_TAG = "USB_HOST";
+
+/*
+ * IDF's optional enumeration filter must be non-NULL whenever
+ * CONFIG_USB_HOST_ENABLE_ENUM_FILTER_CALLBACK is enabled. Accept every device
+ * and explicitly select its first configuration (normally value 1).
+ */
+#if CONFIG_USB_HOST_ENABLE_ENUM_FILTER_CALLBACK
+static bool usb_role_enum_filter(
+    const usb_device_desc_t *desc,
+    uint8_t *configuration_value
+) {
+    if (desc == NULL || configuration_value == NULL) {
+        return false;
+    }
+
+    *configuration_value = 1;
+    ESP_LOGI(USB_HOST_TAG, "ENUM FILTER VID=%04X PID=%04X CFG=%u",
+        desc->idVendor, desc->idProduct, *configuration_value);
+    return true;
+}
+#endif
 
 /*
  * ESP32-S3 USB-OTG can retain DWC2/PHY state from the previous USB role.
@@ -153,6 +177,9 @@ static mp_obj_t usb_role_host_connect(void) {
         .skip_phy_setup = false,
         .root_port_unpowered = false,
         .intr_flags = ESP_INTR_FLAG_LEVEL1,
+#if CONFIG_USB_HOST_ENABLE_ENUM_FILTER_CALLBACK
+        .enum_filter_cb = usb_role_enum_filter,
+#endif
     };
 
     esp_err_t err = usb_host_install(&host_config);
