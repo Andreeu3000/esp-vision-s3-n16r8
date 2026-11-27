@@ -3,7 +3,7 @@ name: Build ESP-VISION S3 N16R8
 on:
   workflow_dispatch:
   push:
-    branches: ["main", "master", "feature/quirc-secondary-reader-20261113-201828", "feature/imlib-file-vision-20261114", "feature/usb-role-switch-20261118"]
+    branches: ["main", "master", "feature/quirc-secondary-reader-20261113-201828", "feature/imlib-file-vision-20261114", "feature/usb-role-switch-20261118", "feature/usb-host-serial-grbl-20261127"]
   pull_request:
 
 permissions:
@@ -36,6 +36,7 @@ jobs:
             esp-vision/boards/ESP32_S3_N16R8
           python3 tools/patch_upstream.py esp-vision
           python3 tools/patch_imlib.py esp-vision
+          python3 tools/usb_serial_patch.py esp-vision
 
       - name: Build firmware with ESP-IDF 5.5.6
         shell: bash
